@@ -112,9 +112,41 @@ class SettingsActivity : AppCompatActivity() {
             )
         }
         btnPermissionAccessibility.setOnClickListener {
-            startActivity(Intent(AndroidSettings.ACTION_ACCESSIBILITY_SETTINGS))
-            toast("Enable \"${getString(R.string.accessibility_label)}\" in the list")
+            // On Android 13+ sideloaded apps hit the "Restricted settings" gate when
+            // they try to enable an Accessibility service. There's no public Intent to
+            // open the "Allow restricted settings" menu directly — the deepest link
+            // Android exposes is the App Info screen, where the 3-dot menu lives.
+            // So on 13+ we show a short explainer with both routes, and on 12 and
+            // below we go straight to Accessibility settings as before.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                showRestrictedSettingsHelper()
+            } else {
+                openAccessibilitySettings()
+            }
         }
+    }
+
+    private fun showRestrictedSettingsHelper() {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.restricted_settings_title)
+            .setMessage(R.string.restricted_settings_message)
+            .setPositiveButton(R.string.restricted_settings_open_app_info) { _, _ -> openAppInfo() }
+            .setNegativeButton(R.string.restricted_settings_go_to_accessibility) { _, _ -> openAccessibilitySettings() }
+            .setNeutralButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun openAppInfo() {
+        val intent = Intent(AndroidSettings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            data = Uri.fromParts("package", packageName, null)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        startActivity(intent)
+    }
+
+    private fun openAccessibilitySettings() {
+        startActivity(Intent(AndroidSettings.ACTION_ACCESSIBILITY_SETTINGS))
+        toast("Enable \"${getString(R.string.accessibility_label)}\" in the list")
     }
 
     /**

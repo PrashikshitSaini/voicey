@@ -91,39 +91,21 @@ In settings:
 
 ## Releasing (maintainer only)
 
-One-time setup, then every `git tag vX.Y.Z && git push --tags` ships a signed APK to GitHub Releases automatically.
+Voicey uses a **shared-signing-key** model. The release keystore is committed to the repo at `app/voicey-release.keystore` and is treated as public infrastructure — same pattern F-Droid and many open-source Android projects use. There is no secret to manage; trust comes from the GitHub Releases URL, not from the signing certificate being private.
 
-### One-time: generate a release keystore
+Practical consequence: anyone who clones the repo can build an APK signed with the same certificate. For sideloaded open-source distribution this is fine. For Play Store distribution you'd want a private keystore instead.
 
-```bash
-mkdir -p ~/.voicey
-keytool -genkey -v \
-  -keystore ~/.voicey/voicey-release.keystore \
-  -alias voicey \
-  -keyalg RSA -keysize 2048 -validity 10000 \
-  -dname "CN=Voicey, O=Voicey, C=US"
-```
+### One-time: generate the shared keystore (in CI, not on your laptop)
 
-You'll be prompted for a keystore password and key password (use the same one for both; write it down — losing it means losing the ability to update the app for existing users).
+You need **zero local tooling** — no JDK, no Docker, nothing.
 
-### One-time: push secrets to GitHub
+1. Open the repo's Actions tab: https://github.com/PrashikshitSaini/voicey/actions
+2. Pick the **Generate signing keystore** workflow on the left.
+3. Click **Run workflow** → **Run workflow**.
+4. Wait ~30 seconds. The workflow generates the keystore and commits it to `main` as `app/voicey-release.keystore`.
+5. `git pull` to bring the keystore into your local clone (optional — you don't actually need it locally).
 
-```bash
-# Encode the keystore as base64 (macOS):
-base64 -i ~/.voicey/voicey-release.keystore | pbcopy
-
-# Open repo secrets:
-open https://github.com/PrashikshitSaini/voicey/settings/secrets/actions
-```
-
-Add four secrets:
-
-| Name | Value |
-|---|---|
-| `KEYSTORE_BASE64` | the base64 you just copied |
-| `KEYSTORE_PASSWORD` | the password you set |
-| `KEY_ALIAS` | `voicey` |
-| `KEY_PASSWORD` | same as `KEYSTORE_PASSWORD` (unless you set them different) |
+This is a one-time step for the lifetime of the project. Don't re-run it unless you're willing to ask every existing user to uninstall before updating.
 
 ### Cutting a release
 
@@ -132,7 +114,7 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The `Release APK` workflow runs, signs, and publishes. APK lands at `https://github.com/PrashikshitSaini/voicey/releases/latest/download/voicey.apk`.
+The `Release APK` workflow runs, signs with the committed keystore, and publishes. The APK lands at `https://github.com/PrashikshitSaini/voicey/releases/latest/download/voicey.apk`.
 
 ## License
 

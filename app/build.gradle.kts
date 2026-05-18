@@ -16,36 +16,17 @@ android {
         vectorDrawables.useSupportLibrary = true
     }
 
-    signingConfigs {
-        create("release") {
-            // CI populates these from GitHub Secrets at build time. Local builds without
-            // the env vars set fall through to the debug signing config below, so
-            // `gradle assembleRelease` still produces an installable APK on a fresh
-            // contributor's laptop without them having to set up a keystore.
-            val keystorePath = System.getenv("KEYSTORE_PATH")
-            val keystorePass = System.getenv("KEYSTORE_PASSWORD")
-            val keyAliasEnv = System.getenv("KEY_ALIAS")
-            val keyPasswordEnv = System.getenv("KEY_PASSWORD")
-            if (!keystorePath.isNullOrBlank() &&
-                !keystorePass.isNullOrBlank() &&
-                !keyAliasEnv.isNullOrBlank() &&
-                !keyPasswordEnv.isNullOrBlank()
-            ) {
-                storeFile = file(keystorePath)
-                storePassword = keystorePass
-                keyAlias = keyAliasEnv
-                keyPassword = keyPasswordEnv
-            }
-        }
-    }
-
     buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.getByName("release")
-                .takeIf { it.storeFile != null }
-                ?: signingConfigs.getByName("debug")
+            // Sign release builds with the debug keystore that Gradle auto-generates on
+            // the CI runner. This makes the APK installable without any keystore setup.
+            // Trade-off: each CI run generates a fresh debug certificate, so users will
+            // need to uninstall an older Voicey before installing a newer release.
+            // Switch to a proper release keystore when there are enough users to make
+            // smooth updates matter — see README → "Stable signing" for the upgrade path.
+            signingConfig = signingConfigs.getByName("debug")
         }
         debug {
             isMinifyEnabled = false

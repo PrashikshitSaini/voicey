@@ -38,6 +38,11 @@
     <string name="notification_title">Voicey is listening</string>
     <string name="notification_text">Tap the bubble to dictate.</string>
 
+    <string name="restricted_settings_title">Android 13+ extra step</string>
+    <string name="restricted_settings_message">Android blocks sideloaded apps from enabling Accessibility by default. To unblock Voicey:\n\n1. Tap \"Open App Info\" below.\n2. On the App Info screen, tap the ⋮ menu at the top right.\n3. Tap \"Allow restricted settings\".\n4. Return here and tap \"Go to Accessibility settings\".\n\nIf you have already done this, just tap \"Go to Accessibility settings\".</string>
+    <string name="restricted_settings_open_app_info">Open App Info</string>
+    <string name="restricted_settings_go_to_accessibility">Go to Accessibility settings</string>
+
     <string name="reset_defaults_button">Reset models &amp; prompts to defaults</string>
     <string name="reset_dialog_title">Reset to defaults?</string>
     <string name="reset_dialog_message">This will restore the API URL, transcription model, cleanup model, language, and system prompt to the values the app ships with.\n\nYour API key, custom vocabulary, and hold-to-talk preference are kept.</string>
