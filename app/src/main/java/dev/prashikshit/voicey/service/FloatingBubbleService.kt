@@ -1,5 +1,6 @@
 package dev.prashikshit.voicey.service
 
+import android.app.AlarmManager
 import android.app.Notification
 import android.app.PendingIntent
 import android.content.Context
@@ -60,9 +61,13 @@ class FloatingBubbleService : LifecycleService() {
 
     override fun onCreate() {
         super.onCreate()
-        startInForeground()
+        // Start with the microphone type *off*. We only claim it during actual recording
+        // so the system's mic-in-use indicator (green dot, "App is using your microphone"
+        // banner) is not shown while the bubble is idle, and the OS doesn't keep the
+        // mic radio warm — better for both privacy UX and battery.
+        startInForeground(includeMicrophone = false)
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-        injector = TextInjector(this)
+        injector = TextInjector()
         pipeline = Pipeline(
             context = this,
             injector = injector,
@@ -96,7 +101,77 @@ class FloatingBubbleService : LifecycleService() {
         super.onDestroy()
     }
 
-    private fun startInForeground() {
+    /**
+     * Called when the user swipes the Voicey launcher activity off the recents stack.
+     *
+     * Even though we're a foreground service, several OEM Android skins (notably Xiaomi,
+     * OPPO, Realme, and Samsung's older "memory saver") kill foreground services anyway
+     * when their app's task is removed. The recommended workaround is to schedule a
+     * one-shot inexact alarm to restart the service a beat later. The restart is allowed
+     * because we were foreground at the moment we scheduled it.
+     *
+     * If the user explicitly stops the bubble via the notification action, [stopSelf] is
+     * called in onStartCommand and onDestroy fires before onTaskRemoved would — so this
+     * path only runs when the kill was OEM-initiated, not user-initiated.
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        val restartIntent = Intent(applicationContext, FloatingBubbleService::class.java)
+        val pendingIntent = PendingIntent.getService(
+            applicationContext,
+            RESTART_REQUEST_CODE,
+            restartIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        alarmManager.set(
+            AlarmManager.RTC,
+            System.currentTimeMillis() + RESTART_DELAY_MS,
+            pendingIntent,
+        )
+        // Intentionally NOT calling super — the default behavior on some OEMs stops the
+        // service immediately, which races our restart alarm. We let the alarm be the
+        // single source of truth for whether we come back.
+    }
+
+    /**
+     * (Re-)enters the foreground state with the requested service-type set.
+     *
+     * Safe to call repeatedly while the service is alive; subsequent calls update the
+     * service's claimed foreground types without restarting the service or re-posting
+     * the notification visibly to the user. We toggle [includeMicrophone] on/off so the
+     * OS only marks us as actively using the mic during real recording sessions.
+     */
+    private fun startInForeground(includeMicrophone: Boolean) {
+        val notification = buildNotification()
+        when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE -> {
+                // Android 14+ requires the microphone FGS type whenever AudioRecord runs
+                // from a foreground service. We OR it in only when we're actively recording.
+                val type = if (includeMicrophone) {
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                } else {
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                }
+                startForeground(VoiceyApp.NOTIFICATION_ID, notification, type)
+            }
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && includeMicrophone -> {
+                // Android 10–13: declaring the microphone type during the recording
+                // window keeps the mic-in-use indicator scoped to that window.
+                startForeground(
+                    VoiceyApp.NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE,
+                )
+            }
+            else -> {
+                // Android 8–9: no foregroundServiceType concept; just keep us foreground.
+                startForeground(VoiceyApp.NOTIFICATION_ID, notification)
+            }
+        }
+    }
+
+    private fun buildNotification(): Notification {
         val launchIntent = Intent(this, SettingsActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK
         }
@@ -106,7 +181,7 @@ class FloatingBubbleService : LifecycleService() {
         val stopIntent = Intent(this, FloatingBubbleService::class.java).apply { action = ACTION_STOP }
         val stopPendingIntent = PendingIntent.getService(this, 1, stopIntent, pendingFlags)
 
-        val notification: Notification = NotificationCompat.Builder(this, VoiceyApp.NOTIFICATION_CHANNEL_ID)
+        return NotificationCompat.Builder(this, VoiceyApp.NOTIFICATION_CHANNEL_ID)
             .setContentTitle(getString(R.string.notification_title))
             .setContentText(getString(R.string.notification_text))
             .setSmallIcon(R.drawable.ic_mic)
@@ -115,19 +190,6 @@ class FloatingBubbleService : LifecycleService() {
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            // Android 14+ requires the microphone FGS type whenever AudioRecord runs from
-            // a foreground service. Without it, AudioRecord.startRecording() throws.
-            startForeground(
-                VoiceyApp.NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
-                    or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE,
-            )
-        } else {
-            startForeground(VoiceyApp.NOTIFICATION_ID, notification)
-        }
     }
 
     private fun addBubble() {
@@ -222,6 +284,13 @@ class FloatingBubbleService : LifecycleService() {
 
     private fun renderState(state: Pipeline.State) {
         currentState = state
+
+        // Only claim the microphone foreground-service type while we're actually
+        // capturing audio. PROCESSING is HTTP-only and IDLE/ERROR don't touch the mic,
+        // so dropping the claim immediately releases the OS mic-in-use indicator and
+        // lets the platform put the mic radio back to sleep.
+        startInForeground(includeMicrophone = state == Pipeline.State.RECORDING)
+
         mainHandler.post {
             val colorRes = when (state) {
                 Pipeline.State.IDLE -> R.color.bubble_idle
@@ -254,6 +323,8 @@ class FloatingBubbleService : LifecycleService() {
 
     companion object {
         private const val ACTION_STOP = "dev.prashikshit.voicey.STOP_BUBBLE"
+        private const val RESTART_REQUEST_CODE = 200
+        private const val RESTART_DELAY_MS = 1_000L
 
         fun start(context: Context) {
             val intent = Intent(context, FloatingBubbleService::class.java)

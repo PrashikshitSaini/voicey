@@ -105,13 +105,12 @@ class Pipeline(
                 focusedNode?.recycle()
 
                 when (result) {
-                    TextInjector.InsertionResult.PASTED,
-                    TextInjector.InsertionResult.SET_TEXT -> updateState(State.IDLE)
+                    TextInjector.InsertionResult.WROTE -> updateState(State.IDLE)
                     TextInjector.InsertionResult.NO_FOCUSED_NODE -> {
                         updateState(State.IDLE)
                         onMessage("Tap a text field first")
                     }
-                    TextInjector.InsertionResult.FAILED -> fail("Could not insert text into this app")
+                    TextInjector.InsertionResult.FAILED -> fail("This app blocks accessibility writes")
                     TextInjector.InsertionResult.SKIPPED_EMPTY -> updateState(State.IDLE)
                 }
             } catch (ce: CancellationException) {
