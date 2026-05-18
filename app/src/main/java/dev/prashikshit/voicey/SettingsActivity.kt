@@ -11,6 +11,7 @@ import android.os.Bundle
 import android.provider.Settings as AndroidSettings
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import dev.prashikshit.voicey.data.Settings
@@ -48,6 +49,7 @@ class SettingsActivity : AppCompatActivity() {
         bindFields(Settings.load(this))
         wirePermissionButtons()
         wireBubbleToggle()
+        wireResetButton()
     }
 
     override fun onResume() {
@@ -66,6 +68,7 @@ class SettingsActivity : AppCompatActivity() {
         inputApiKey.setText(settings.apiKey)
         inputTranscriptionModel.setText(settings.transcriptionModel)
         inputCleanupModel.setText(settings.cleanupModel)
+        inputLanguage.setText(settings.language)
         inputVocabulary.setText(settings.vocabulary.joinToString("\n"))
         inputPrompt.setText(settings.systemPrompt)
         switchHoldToTalk.isChecked = settings.holdToTalk
@@ -82,6 +85,8 @@ class SettingsActivity : AppCompatActivity() {
             systemPrompt = binding.inputPrompt.text?.toString().orEmpty()
                 .ifBlank { Settings.DEFAULT_SYSTEM_PROMPT },
             holdToTalk = binding.switchHoldToTalk.isChecked,
+            language = binding.inputLanguage.text?.toString().orEmpty()
+                .ifBlank { Settings.DEFAULT_LANGUAGE },
         )
         Settings.save(this, current)
     }
@@ -110,6 +115,38 @@ class SettingsActivity : AppCompatActivity() {
             startActivity(Intent(AndroidSettings.ACTION_ACCESSIBILITY_SETTINGS))
             toast("Enable \"${getString(R.string.accessibility_label)}\" in the list")
         }
+    }
+
+    /**
+     * Restores the fields that ship with the app (API base, models, language, system
+     * prompt) to their defaults. User-specific data — the API key, custom vocabulary,
+     * and hold-to-talk preference — is intentionally preserved, because losing those
+     * to an accidental tap would be a worse user experience than a few leftover
+     * customizations.
+     */
+    private fun wireResetButton() {
+        binding.btnResetDefaults.setOnClickListener {
+            AlertDialog.Builder(this)
+                .setTitle(R.string.reset_dialog_title)
+                .setMessage(R.string.reset_dialog_message)
+                .setPositiveButton(R.string.reset_confirm) { _, _ -> performReset() }
+                .setNegativeButton(android.R.string.cancel, null)
+                .show()
+        }
+    }
+
+    private fun performReset() {
+        val current = Settings.load(this)
+        val restored = current.copy(
+            apiBase = Settings.DEFAULT_API_BASE,
+            transcriptionModel = Settings.DEFAULT_TRANSCRIPTION_MODEL,
+            cleanupModel = Settings.DEFAULT_CLEANUP_MODEL,
+            systemPrompt = Settings.DEFAULT_SYSTEM_PROMPT,
+            language = Settings.DEFAULT_LANGUAGE,
+        )
+        Settings.save(this, restored)
+        bindFields(restored)
+        toast(getString(R.string.reset_complete))
     }
 
     private fun wireBubbleToggle() {

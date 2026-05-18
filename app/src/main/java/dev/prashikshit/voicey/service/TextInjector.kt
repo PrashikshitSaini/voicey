@@ -23,9 +23,16 @@ class TextInjector {
         if (node == null) return InsertionResult.NO_FOCUSED_NODE
 
         val current = (node.text ?: "").toString()
-        val rawCursor = node.textSelectionStart
-        val cursor = if (rawCursor in 0..current.length) rawCursor else current.length
-        val spliced = current.substring(0, cursor) + text + current.substring(cursor)
+        // Honor any live selection: if the user highlighted text and then dictated, the
+        // dictated text replaces the highlighted range — matching every native IME's
+        // behavior. Reading only textSelectionStart (the previous bug) inserted the new
+        // text before the selection and left the highlighted region intact, producing
+        // doubled / garbled output.
+        val rawStart = node.textSelectionStart
+        val rawEnd = node.textSelectionEnd
+        val cursor = if (rawStart in 0..current.length) rawStart else current.length
+        val endCut = if (rawEnd in cursor..current.length) rawEnd else cursor
+        val spliced = current.substring(0, cursor) + text + current.substring(endCut)
 
         val setArgs = Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, spliced)

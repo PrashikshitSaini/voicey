@@ -19,6 +19,9 @@
     <string name="cleanup_model_label">Cleanup model</string>
     <string name="cleanup_model_hint">llama-3.3-70b-versatile</string>
 
+    <string name="language_label">Language (ISO code: en, hi, es, …)</string>
+    <string name="language_hint">en</string>
+
     <string name="vocabulary_label">Custom vocabulary (one per line)</string>
     <string name="prompt_label">System prompt</string>
 
@@ -34,4 +37,10 @@
     <string name="notification_channel_name">Voicey bubble</string>
     <string name="notification_title">Voicey is listening</string>
     <string name="notification_text">Tap the bubble to dictate.</string>
+
+    <string name="reset_defaults_button">Reset models &amp; prompts to defaults</string>
+    <string name="reset_dialog_title">Reset to defaults?</string>
+    <string name="reset_dialog_message">This will restore the API URL, transcription model, cleanup model, language, and system prompt to the values the app ships with.\n\nYour API key, custom vocabulary, and hold-to-talk preference are kept.</string>
+    <string name="reset_confirm">Reset</string>
+    <string name="reset_complete">Restored to factory defaults</string>
 </resources>

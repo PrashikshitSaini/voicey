@@ -123,11 +123,29 @@ class FloatingBubbleService : LifecycleService() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        alarmManager.set(
-            AlarmManager.RTC,
-            System.currentTimeMillis() + RESTART_DELAY_MS,
-            pendingIntent,
-        )
+        val fireAt = System.currentTimeMillis() + RESTART_DELAY_MS
+
+        // Android 12+ blocks foreground services from being started while the app is in
+        // the background unless the start is delivered by an *exact* alarm. An inexact
+        // setAndAllowWhileIdle does NOT grant the same exemption, so we must use
+        // setExactAndAllowWhileIdle here — otherwise the restart silently fails on the
+        // majority of installs. We fall back to inexact only if the user has revoked
+        // SCHEDULE_EXACT_ALARM (rare; better than crashing).
+        val canExact = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+            alarmManager.canScheduleExactAlarms()
+        if (canExact) {
+            alarmManager.setExactAndAllowWhileIdle(
+                AlarmManager.RTC_WAKEUP,
+                fireAt,
+                pendingIntent,
+            )
+        } else {
+            alarmManager.setAndAllowWhileIdle(
+                AlarmManager.RTC_WAKEUP,
+                fireAt,
+                pendingIntent,
+            )
+        }
         // Intentionally NOT calling super — the default behavior on some OEMs stops the
         // service immediately, which races our restart alarm. We let the alarm be the
         // single source of truth for whether we come back.

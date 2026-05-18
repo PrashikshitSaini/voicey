@@ -35,11 +35,27 @@ class WhisperClient(private val settings: Settings) {
             throw TranscriptionException("API key or base URL is missing")
         }
 
+        // Whisper hallucinates YouTube-style phrases ("Subscribe", "Thanks for watching",
+        // "search history", etc.) when it gets short or silence-padded audio. Two defenses:
+        //   1. `prompt` biases the decoder toward plain dictation style + the user's vocab.
+        //      The model treats prompt text as "what came right before this audio," so
+        //      anchoring it in dictation tone makes YouTube-trained continuations less likely.
+        //   2. `language` pins the language so Whisper doesn't language-detect into a
+        //      hallucinated direction on very short clips.
+        val promptParts = buildList {
+            add("The following is verbatim spoken dictation from a user typing in an app.")
+            if (settings.vocabulary.isNotEmpty()) {
+                add("Names and terms that may appear: ${settings.vocabulary.joinToString(", ")}.")
+            }
+        }.joinToString(" ")
+
         val multipart = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
             .addFormDataPart("model", settings.transcriptionModel)
             .addFormDataPart("response_format", "text")
             .addFormDataPart("temperature", "0")
+            .addFormDataPart("prompt", promptParts)
+            .addFormDataPart("language", settings.language.ifBlank { "en" })
             .addFormDataPart("file", audio.name, audio.asRequestBody("audio/wav".toMediaType()))
             .build()
 

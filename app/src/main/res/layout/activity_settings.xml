@@ -119,6 +119,19 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
+            android:hint="@string/language_label">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/input_language"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="text"
+                android:hint="@string/language_hint" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
             android:hint="@string/vocabulary_label">
             <com.google.android.material.textfield.TextInputEditText
                 android:id="@+id/input_vocabulary"
@@ -156,5 +169,14 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="24dp"
             android:text="@string/start_bubble" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_reset_defaults"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/reset_defaults_button"
+            android:textColor="?attr/colorError" />
     </LinearLayout>
 </ScrollView>
