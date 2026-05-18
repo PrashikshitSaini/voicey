@@ -4,6 +4,21 @@ Open-source AI dictation for Android. Speak into a floating bubble, get cleaned-
 
 Inspired by [FreeFlow](https://github.com/zachlatta/freeflow) on macOS and the architecture of [Wispr Flow](https://wisprflow.ai)'s Android app — but free forever by construction.
 
+## Download
+
+Grab the latest signed APK and sideload it:
+
+**[➜ Download voicey.apk (latest release)](https://github.com/PrashikshitSaini/voicey/releases/latest/download/voicey.apk)**
+
+On your phone:
+1. Open the link above, download the APK.
+2. Tap to install. Android will ask you to enable "Install unknown apps" for whichever file manager / browser you used — grant it once, then tap install.
+3. Open Voicey, paste your API key (get a free one at [groq.com](https://console.groq.com/keys)), grant the four permissions, tap **Start bubble**.
+
+Don't see a release link yet? Either:
+- No version has been tagged yet (build one yourself from source — see below), or
+- Use [Obtainium](https://github.com/ImranR98/Obtainium) and point it at `https://github.com/PrashikshitSaini/voicey` for auto-updates from GitHub Releases.
+
 ## How it works
 
 ```
@@ -73,6 +88,51 @@ In settings:
 - The cleanup request sends the raw transcript, the focused field's surrounding text, the foreground app's package name, and your custom vocabulary to the same endpoint.
 - Nothing is sent to anyone else. No telemetry. No analytics. No server owned by this project — there is no server.
 - API keys are stored in `EncryptedSharedPreferences` (Android Keystore-backed AES-256).
+
+## Releasing (maintainer only)
+
+One-time setup, then every `git tag vX.Y.Z && git push --tags` ships a signed APK to GitHub Releases automatically.
+
+### One-time: generate a release keystore
+
+```bash
+mkdir -p ~/.voicey
+keytool -genkey -v \
+  -keystore ~/.voicey/voicey-release.keystore \
+  -alias voicey \
+  -keyalg RSA -keysize 2048 -validity 10000 \
+  -dname "CN=Voicey, O=Voicey, C=US"
+```
+
+You'll be prompted for a keystore password and key password (use the same one for both; write it down — losing it means losing the ability to update the app for existing users).
+
+### One-time: push secrets to GitHub
+
+```bash
+# Encode the keystore as base64 (macOS):
+base64 -i ~/.voicey/voicey-release.keystore | pbcopy
+
+# Open repo secrets:
+open https://github.com/PrashikshitSaini/voicey/settings/secrets/actions
+```
+
+Add four secrets:
+
+| Name | Value |
+|---|---|
+| `KEYSTORE_BASE64` | the base64 you just copied |
+| `KEYSTORE_PASSWORD` | the password you set |
+| `KEY_ALIAS` | `voicey` |
+| `KEY_PASSWORD` | same as `KEYSTORE_PASSWORD` (unless you set them different) |
+
+### Cutting a release
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The `Release APK` workflow runs, signs, and publishes. APK lands at `https://github.com/PrashikshitSaini/voicey/releases/latest/download/voicey.apk`.
 
 ## License
 
