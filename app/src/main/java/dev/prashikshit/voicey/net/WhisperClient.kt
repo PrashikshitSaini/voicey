@@ -39,32 +39,38 @@ class WhisperClient(private val settings: Settings) {
             throw TranscriptionException("API key or base URL is missing")
         }
 
-        // Whisper hallucinates short phrases ("Subscribe", "Thanks for watching", and
-        // search-bar-style fillers like "Search history") when given silent or noisy
-        // audio. Three layers of defense:
+        // Hallucination defenses:
         //
-        //   1. `prompt` biases the decoder toward plain dictation style + user vocab.
-        //   2. `language` pins the language so Whisper doesn't language-detect into a
+        //   1. `language` pins the language so Whisper doesn't language-detect into a
         //      hallucinated direction on very short clips.
-        //   3. `response_format=verbose_json` returns per-segment `no_speech_prob`
+        //   2. `response_format=verbose_json` returns per-segment `no_speech_prob`
         //      scores so we can detect and drop hallucinations post-hoc. See
         //      [isHallucination] below. This is the trick FreeFlow uses on macOS.
-        val promptParts = buildList {
-            add("The following is verbatim spoken dictation from a user typing in an app.")
-            if (settings.vocabulary.isNotEmpty()) {
-                add("Names and terms that may appear: ${settings.vocabulary.joinToString(", ")}.")
-            }
-        }.joinToString(" ")
+        //
+        // We deliberately do NOT send a `prompt` style preamble. The OpenAI Whisper
+        // `prompt` parameter is interpreted as "the text that came immediately before
+        // this audio" — when given silent or noise-only input, Whisper will often
+        // echo the prompt back as the transcription. Sending "The following is
+        // verbatim spoken dictation…" caused that exact phrase to appear in the
+        // output on silent taps. The only legitimate use of `prompt` is keyword
+        // biasing, so we only send it when the user has configured vocabulary terms.
+        val vocabPrompt = settings.vocabulary.joinToString(", ").trim()
 
-        val multipart = MultipartBody.Builder()
+        val multipartBuilder = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
             .addFormDataPart("model", settings.transcriptionModel)
             .addFormDataPart("response_format", "verbose_json")
             .addFormDataPart("temperature", "0")
-            .addFormDataPart("prompt", promptParts)
             .addFormDataPart("language", settings.language.ifBlank { "en" })
-            .addFormDataPart("file", audio.name, audio.asRequestBody("audio/wav".toMediaType()))
-            .build()
+        if (vocabPrompt.isNotEmpty()) {
+            multipartBuilder.addFormDataPart("prompt", vocabPrompt)
+        }
+        multipartBuilder.addFormDataPart(
+            "file",
+            audio.name,
+            audio.asRequestBody("audio/wav".toMediaType()),
+        )
+        val multipart = multipartBuilder.build()
 
         val request = Request.Builder()
             .url("${settings.apiBase.trimEnd('/')}/audio/transcriptions")
