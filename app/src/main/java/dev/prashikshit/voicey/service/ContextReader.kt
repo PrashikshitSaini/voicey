@@ -16,7 +16,10 @@ object ContextReader {
 
     fun read(node: AccessibilityNodeInfo?, packageName: String?): CleanupContext {
         if (node == null) return CleanupContext.EMPTY
-        val text = (node.text ?: "").toString()
+        // Reject hint/placeholder text — sending it to the cleanup LLM as "field context"
+        // both wastes tokens and risks the model treating the hint as user-typed content
+        // it should preserve. Same heuristic as TextInjector.effectiveCurrentText().
+        val text = userEnteredText(node)
         if (text.isEmpty()) {
             return CleanupContext(
                 app = packageName.orEmpty(),
@@ -33,5 +36,14 @@ object ContextReader {
             textBefore = before,
             textAfter = after,
         )
+    }
+
+    private fun userEnteredText(node: AccessibilityNodeInfo): String {
+        val text = (node.text ?: "").toString()
+        if (text.isEmpty()) return ""
+        if (node.isShowingHintText) return ""
+        val hint = (node.hintText ?: "").toString()
+        if (hint.isNotEmpty() && hint == text) return ""
+        return text
     }
 }
