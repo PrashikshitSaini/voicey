@@ -67,7 +67,7 @@ class FloatingBubbleService : LifecycleService() {
         // mic radio warm — better for both privacy UX and battery.
         startInForeground(includeMicrophone = false)
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-        injector = TextInjector()
+        injector = TextInjector(this)
         pipeline = Pipeline(
             context = this,
             injector = injector,
