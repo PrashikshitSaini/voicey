@@ -12,22 +12,25 @@ import android.view.accessibility.AccessibilityNodeInfo
 /**
  * Writes the transcribed text into the currently focused field.
  *
- * Two-tier strategy:
+ * Two-tier strategy, paste-first:
  *
- *   1. **ACTION_SET_TEXT** — the clean path. Replaces the field's content directly,
- *      never touches the clipboard. Works on every native Android text field. Replaces
- *      (rather than splices) for the reasons documented in the v0.1.3 commit: many
- *      Android apps return placeholder/hint as `node.text` without setting
- *      `isShowingHintText`, and splicing into that hint produced "Type a message Hello"
- *      output. Always-replace removed that whole class of bug.
+ *   1. **Clipboard + ACTION_PASTE** — the primary path. ACTION_PASTE is the platform's
+ *      native "insert at cursor" action: it preserves existing typed content, naturally
+ *      appends dictation, and bypasses the placeholder-as-`node.text` bug that splice-
+ *      based SET_TEXT injection kept hitting on Compose-based inputs (WhatsApp, search
+ *      bars, etc.). It also works on WebView-hosted HTML form fields, which is the only
+ *      reliable Android-level way to inject text into them. The user's previous
+ *      clipboard contents are saved before our paste and restored ~500 ms later.
  *
- *   2. **Clipboard + ACTION_PASTE** — the fallback. HTML `<input>` / `<textarea>`
- *      fields rendered inside Chrome (and other WebView-based apps) reject
- *      ACTION_SET_TEXT because the text is owned by the JS/DOM model, not Android's
- *      view tree. ACTION_PASTE goes through Chrome's internal paste handler, which
- *      bridges to the JS input event. The previous clipboard contents are saved
- *      before our write and restored ~500ms later. The clipboard is only touched
- *      when ACTION_SET_TEXT fails, so native-app dictations stay clipboard-free.
+ *   2. **ACTION_SET_TEXT** — fallback only. Used when ACTION_PASTE is unsupported on
+ *      the focused node (rare; usually custom views that expose SET_TEXT but not PASTE).
+ *      Replaces the field's content because there's no safe way to splice without
+ *      re-introducing the placeholder bug.
+ *
+ * Trade-off vs. v0.1.4/v0.1.5: the clipboard is touched on every dictation now, not
+ * only on WebView fallbacks. Clipboard-history tools (Gboard, etc.) will briefly see
+ * dictated text. The win: append behavior works everywhere, and the placeholder-prepend
+ * bug class is structurally eliminated rather than papered over with heuristics.
  */
 class TextInjector(context: Context) {
 
@@ -39,7 +42,11 @@ class TextInjector(context: Context) {
         if (text.isEmpty()) return InsertionResult.SKIPPED_EMPTY
         if (node == null) return InsertionResult.NO_FOCUSED_NODE
 
-        // Tier 1: direct write. The fast, clipboard-free path.
+        // Tier 1: clipboard + paste. Appends at cursor, preserves existing text.
+        if (pasteViaClipboard(node, text)) return InsertionResult.WROTE
+
+        // Tier 2: SET_TEXT fallback. Replaces content. Rare path — only triggered
+        // when the focused node has no working paste handler.
         val setArgs = Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
         }
@@ -48,13 +55,11 @@ class TextInjector(context: Context) {
             return InsertionResult.WROTE
         }
 
-        // Tier 2: clipboard + paste. Required for HTML form fields inside Chrome and
-        // other WebView-hosted inputs. Save and restore the user's clipboard around
-        // the paste so we don't permanently clobber what they had copied.
-        return pasteViaClipboard(node, text)
+        return InsertionResult.FAILED
     }
 
-    private fun pasteViaClipboard(node: AccessibilityNodeInfo, text: String): InsertionResult {
+    /** Returns true if the paste succeeded. Always schedules a clipboard restore. */
+    private fun pasteViaClipboard(node: AccessibilityNodeInfo, text: String): Boolean {
         val previousClip: ClipData? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             clipboard.primaryClip
         } else {
@@ -68,7 +73,7 @@ class TextInjector(context: Context) {
 
         val pasted = node.performAction(AccessibilityNodeInfo.ACTION_PASTE)
         restoreClipboardLater(previousClip)
-        return if (pasted) InsertionResult.WROTE else InsertionResult.FAILED
+        return pasted
     }
 
     private fun moveCaretToEnd(node: AccessibilityNodeInfo, position: Int) {
