@@ -1,12 +1,14 @@
 package dev.prashikshit.voicey.service
 
 import android.content.ClipData
+import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.PersistableBundle
 import android.view.accessibility.AccessibilityNodeInfo
 
 /**
@@ -69,11 +71,34 @@ class TextInjector(context: Context) {
             null
         }
 
-        clipboard.setPrimaryClip(ClipData.newPlainText("voicey", text))
+        clipboard.setPrimaryClip(buildDictationClip(text))
 
         val pasted = node.performAction(AccessibilityNodeInfo.ACTION_PASTE)
         restoreClipboardLater(previousClip)
         return pasted
+    }
+
+    /**
+     * Builds the [ClipData] we write before pasting. On Android 13+ we mark the clip
+     * as sensitive via [ClipDescription.EXTRA_IS_SENSITIVE], which tells the system:
+     *
+     *  - Don't show the "App pasted from your clipboard" preview popup.
+     *  - Don't save this entry to clipboard history. Gboard's clipboard panel and
+     *    other clipboard managers respect this flag.
+     *
+     * This is the same affordance password managers and OTP-autofill apps use so their
+     * transient writes don't pollute the user's clipboard history. On Android 12 and
+     * below the flag is silently ignored — the clipboard still shows the dictation,
+     * which is unavoidable until those devices get an API equivalent.
+     */
+    private fun buildDictationClip(text: String): ClipData {
+        val clip = ClipData.newPlainText("voicey", text)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            clip.description.extras = PersistableBundle().apply {
+                putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true)
+            }
+        }
+        return clip
     }
 
     private fun moveCaretToEnd(node: AccessibilityNodeInfo, position: Int) {
