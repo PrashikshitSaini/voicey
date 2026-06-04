@@ -22,7 +22,9 @@ import android.view.accessibility.AccessibilityNodeInfo
  *      based SET_TEXT injection kept hitting on Compose-based inputs (WhatsApp, search
  *      bars, etc.). It also works on WebView-hosted HTML form fields, which is the only
  *      reliable Android-level way to inject text into them. The user's previous
- *      clipboard contents are saved before our paste and restored ~500 ms later.
+ *      clipboard contents are saved before our paste and restored ~500 ms later;
+ *      when there was no previous clip, the clipboard is cleared instead so the
+ *      dictation never lingers there.
  *
  *   2. **ACTION_SET_TEXT** — fallback only. Used when ACTION_PASTE is unsupported on
  *      the focused node (rare; usually custom views that expose SET_TEXT but not PASTE).
@@ -111,16 +113,28 @@ class TextInjector(context: Context) {
         node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, cursorArgs)
     }
 
+    /**
+     * Leaves the clipboard exactly as we found it: the previous clip is restored, and
+     * when there was none (or we couldn't read it, pre-P) the dictation clip is cleared
+     * rather than left behind. Consequence: the last dictation can't be manually
+     * re-pasted from the clipboard — by design, dictations leave no clipboard residue.
+     */
     private fun restoreClipboardLater(previous: ClipData?) {
-        if (previous == null) return
         mainHandler.postDelayed({
             try {
-                clipboard.setPrimaryClip(previous)
+                when {
+                    previous != null -> clipboard.setPrimaryClip(previous)
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.P -> clipboard.clearPrimaryClip()
+                    // Pre-P there is no clearPrimaryClip(); overwriting with an empty
+                    // clip would still leave an entry, so the dictation stays — same
+                    // trade-off as the unreadable-previous-clip path on those devices.
+                    else -> Unit
+                }
             } catch (_: SecurityException) {
                 // Some OEMs throw if the foreground app changes during the delay window
                 // (Android 10+ restricts clipboard writes from background contexts).
-                // Best-effort restore; failure here means the user's previous clipboard
-                // content is lost, which is the documented trade-off.
+                // Best-effort; failure means either the previous clip isn't restored or
+                // the dictation lingers on the clipboard — the documented trade-off.
             }
         }, CLIPBOARD_RESTORE_DELAY_MS)
     }
