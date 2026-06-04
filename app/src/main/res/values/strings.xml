@@ -28,6 +28,9 @@
     <string name="hold_to_talk_label">Hold to talk (release to stop)</string>
     <string name="show_only_while_typing_label">Show pill only while typing</string>
     <string name="sound_feedback_label">Sound on record start/stop</string>
+    <string name="learn_corrections_label">Learn from my spelling fixes</string>
+    <string name="clear_corrections_button">Clear learned corrections</string>
+    <string name="corrections_cleared">Cleared %1$d learned corrections</string>
 
     <string name="pill_tap_to_speak">Tap to speak</string>
     <string name="pill_processing">Polishing…</string>

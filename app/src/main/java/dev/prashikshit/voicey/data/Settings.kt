@@ -23,6 +23,8 @@ data class Settings(
     val showOnlyWhileTyping: Boolean,
     /** Play the gentle start/stop recording cues. */
     val soundFeedback: Boolean,
+    /** Learn spelling fixes the user makes right after a dictation lands. */
+    val learnCorrections: Boolean,
 ) {
     fun isReady(): Boolean = apiKey.isNotBlank() && apiBase.isNotBlank()
 
@@ -86,6 +88,7 @@ Output rules:
                 language = store.getString(KEY_LANGUAGE, DEFAULT_LANGUAGE),
                 showOnlyWhileTyping = store.getBoolean(KEY_SHOW_ONLY_WHILE_TYPING, true),
                 soundFeedback = store.getBoolean(KEY_SOUND_FEEDBACK, true),
+                learnCorrections = store.getBoolean(KEY_LEARN_CORRECTIONS, true),
             )
         }
 
@@ -101,6 +104,7 @@ Output rules:
             store.putString(KEY_LANGUAGE, settings.language.trim().ifBlank { DEFAULT_LANGUAGE })
             store.putBoolean(KEY_SHOW_ONLY_WHILE_TYPING, settings.showOnlyWhileTyping)
             store.putBoolean(KEY_SOUND_FEEDBACK, settings.soundFeedback)
+            store.putBoolean(KEY_LEARN_CORRECTIONS, settings.learnCorrections)
         }
 
         private const val KEY_API_BASE = "api_base"
@@ -113,5 +117,6 @@ Output rules:
         private const val KEY_LANGUAGE = "language"
         private const val KEY_SHOW_ONLY_WHILE_TYPING = "show_only_while_typing"
         private const val KEY_SOUND_FEEDBACK = "sound_feedback"
+        private const val KEY_LEARN_CORRECTIONS = "learn_corrections"
     }
 }

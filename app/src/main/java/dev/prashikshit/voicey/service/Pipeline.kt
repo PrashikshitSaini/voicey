@@ -2,6 +2,7 @@ package dev.prashikshit.voicey.service
 
 import android.content.Context
 import dev.prashikshit.voicey.audio.Recorder
+import dev.prashikshit.voicey.data.LearnedCorrections
 import dev.prashikshit.voicey.data.Settings
 import dev.prashikshit.voicey.net.PostProcessException
 import dev.prashikshit.voicey.net.PostProcessor
@@ -81,14 +82,16 @@ class Pipeline(
 
             updateState(State.PROCESSING)
             try {
-                val settings = withContext(Dispatchers.IO) { Settings.load(context) }
+                val (settings, corrections) = withContext(Dispatchers.IO) {
+                    Settings.load(context) to LearnedCorrections(context).all()
+                }
                 if (!settings.isReady()) {
                     fail("Set API key in Voicey settings")
                     return@launch
                 }
 
                 val whisper = WhisperClient(settings)
-                val postProcessor = PostProcessor(settings)
+                val postProcessor = PostProcessor(settings, corrections)
 
                 val raw = whisper.transcribe(audioFile)
                 if (raw.isBlank()) {
@@ -107,7 +110,18 @@ class Pipeline(
                 focusedNode?.recycle()
 
                 when (result) {
-                    TextInjector.InsertionResult.WROTE -> updateState(State.IDLE)
+                    TextInjector.InsertionResult.WROTE -> {
+                        if (settings.learnCorrections) {
+                            CorrectionLearner.onTextInserted(
+                                context = context,
+                                inserted = toInsert,
+                                packageName = FocusAccessibilityService.currentPackageName(),
+                                textBefore = ctx.textBefore,
+                                textAfter = ctx.textAfter,
+                            )
+                        }
+                        updateState(State.IDLE)
+                    }
                     TextInjector.InsertionResult.NO_FOCUSED_NODE -> {
                         updateState(State.IDLE)
                         onMessage("Tap a text field first")

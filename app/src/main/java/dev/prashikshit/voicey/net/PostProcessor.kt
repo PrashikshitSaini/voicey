@@ -1,5 +1,6 @@
 package dev.prashikshit.voicey.net
 
+import dev.prashikshit.voicey.data.Correction
 import dev.prashikshit.voicey.data.Settings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -19,7 +20,11 @@ import java.util.concurrent.TimeUnit
  * If the model returns the sentinel "EMPTY", this returns an empty string so the
  * caller can skip insertion.
  */
-class PostProcessor(private val settings: Settings) {
+class PostProcessor(
+    private val settings: Settings,
+    /** Spellings the user has fixed by hand after past dictations — see CorrectionLearner. */
+    private val corrections: List<Correction> = emptyList(),
+) {
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -88,6 +93,15 @@ class PostProcessor(private val settings: Settings) {
             appendLine()
             appendLine("CUSTOM_VOCABULARY (spellings to preserve if mentioned):")
             settings.vocabulary.forEach { appendLine("- $it") }
+        }
+        if (corrections.isNotEmpty()) {
+            appendLine()
+            appendLine(
+                "KNOWN_CORRECTIONS (the user previously fixed these transcription " +
+                    "mistakes; if the transcript contains the left side, write the " +
+                    "right side instead — apply only on a match, never otherwise):"
+            )
+            corrections.forEach { appendLine("- ${it.wrong} → ${it.right}") }
         }
     }.trim()
 

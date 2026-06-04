@@ -179,6 +179,20 @@
             android:layout_marginTop="8dp"
             android:text="@string/sound_feedback_label" />
 
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/switch_learn_corrections"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/learn_corrections_label" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_clear_corrections"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/clear_corrections_button" />
+
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_toggle_bubble"
             android:layout_width="match_parent"

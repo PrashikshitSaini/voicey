@@ -17,3 +17,5 @@ metadata:
 - `desiredVisible()` pins the pill during RECORDING/PROCESSING; falls back to always-visible when accessibility is off. Keyboard detection on Samsung OneUI unverified on-device as of writing.
 
 **How to apply:** before modifying bubble visibility, positioning, or recorder internals, re-read these spots and preserve the invariants above.
+
+**2026-06-04 addendum (same branch):** clipboard now restore-or-clear after paste (TextInjector — never walk back to SET_TEXT splicing, placeholder bug); CorrectionLearner learns spelling fixes from post-dictation edits (LCS token diff scoped to inserted tokens, precision-first thresholds, 45s session). Invariants: `wantsTextFrom()` gate must stay BEFORE `event.source` fetch in TYPE_VIEW_TEXT_CHANGED (fires every keystroke system-wide); learned terms must stay OUT of the Whisper prompt (echo/hallucination vector — cleanup KNOWN_CORRECTIONS only); the clear-corrections button is the escape hatch for bad learns — never remove it. Learner expects on-device threshold tuning; won't fire in WebViews (no reliable text-change events).

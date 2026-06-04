@@ -54,7 +54,23 @@ class FocusAccessibilityService : AccessibilityService() {
                 source.recycle()
                 notifyListener()
             }
+            AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> {
+                // This event fires on every keystroke in every app. Gate on an active
+                // learning session BEFORE touching event.source — fetching the node is
+                // a cross-process call we must not pay system-wide for no reason.
+                if (!CorrectionLearner.wantsTextFrom(pkg)) return
+                // Never observe text the user types into password fields.
+                val source = event.source ?: return
+                val isPassword = source.isPassword
+                val text = if (isPassword) null else source.text?.toString()
+                @Suppress("DEPRECATION")
+                source.recycle()
+                if (text != null) {
+                    CorrectionLearner.onTextChanged(pkg, text)
+                }
+            }
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
+                CorrectionLearner.onAppChanged(pkg)
                 // App/window switch — any remembered password-field focus is stale.
                 if (passwordFieldFocused) {
                     passwordFieldFocused = false
@@ -132,8 +148,11 @@ class FocusAccessibilityService : AccessibilityService() {
         private fun shouldShowBubble(): Boolean = keyboardVisible && !passwordFieldFocused
 
         private fun updateKeyboardState(visible: Boolean, top: Int) {
+            val wasVisible = keyboardVisible
             keyboardVisible = visible
             keyboardTop = top
+            // Keyboard dismissal ends the user's editing pass — let the learner settle.
+            if (wasVisible && !visible) CorrectionLearner.onKeyboardClosed()
             notifyListener()
         }
 

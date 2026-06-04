@@ -85,9 +85,11 @@ In settings:
 ## Privacy
 
 - Audio leaves your device only to the API endpoint you configure (e.g., Groq).
-- The cleanup request sends the raw transcript, the focused field's surrounding text, the foreground app's package name, and your custom vocabulary to the same endpoint.
+- The cleanup request sends the raw transcript, the focused field's surrounding text, the foreground app's package name, your custom vocabulary, and your learned corrections to the same endpoint.
 - Nothing is sent to anyone else. No telemetry. No analytics. No server owned by this project — there is no server.
 - API keys are stored in `EncryptedSharedPreferences` (Android Keystore-backed AES-256).
+- Dictations leave no clipboard residue: your previous clipboard is restored (or cleared, if it was empty) about half a second after insertion, and the transient clip is flagged sensitive so it never enters clipboard history (Android 13+).
+- **Learning from your fixes** ("Learn from my spelling fixes", on by default): if you correct a word right after a dictation lands — say Voicey wrote `VHISPERFLOW` and you fix it to `Wispr Flow` — the pair is learned and applied to future dictations. Learning watches only the field Voicey just dictated into, for at most 45 seconds, never password fields. Pairs are stored on-device in the same encrypted prefs and are erasable anytime via "Clear learned corrections".
 
 ## Releasing (maintainer only)
 

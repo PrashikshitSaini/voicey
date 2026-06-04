@@ -16,6 +16,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import dev.prashikshit.voicey.data.LearnedCorrections
 import dev.prashikshit.voicey.data.Settings
 import dev.prashikshit.voicey.databinding.ActivitySettingsBinding
 import dev.prashikshit.voicey.service.FloatingBubbleService
@@ -53,6 +54,7 @@ class SettingsActivity : AppCompatActivity() {
         wirePermissionButtons()
         wireBubbleToggle()
         wireResetButton()
+        wireClearCorrectionsButton()
     }
 
     override fun onResume() {
@@ -79,6 +81,7 @@ class SettingsActivity : AppCompatActivity() {
         switchHoldToTalk.isChecked = settings.holdToTalk
         switchShowOnlyWhileTyping.isChecked = settings.showOnlyWhileTyping
         switchSoundFeedback.isChecked = settings.soundFeedback
+        switchLearnCorrections.isChecked = settings.learnCorrections
     }
 
     /**
@@ -110,8 +113,22 @@ class SettingsActivity : AppCompatActivity() {
                 .ifBlank { Settings.DEFAULT_LANGUAGE },
             showOnlyWhileTyping = binding.switchShowOnlyWhileTyping.isChecked,
             soundFeedback = binding.switchSoundFeedback.isChecked,
+            learnCorrections = binding.switchLearnCorrections.isChecked,
         )
         Settings.save(this, current)
+    }
+
+    /**
+     * The escape hatch for the correction learner: a wrongly learned pair would bias
+     * every future dictation, so wiping the learned store must always be one tap away.
+     */
+    private fun wireClearCorrectionsButton() {
+        binding.btnClearCorrections.setOnClickListener {
+            val store = LearnedCorrections(this)
+            val count = store.count()
+            store.clear()
+            toast(getString(R.string.corrections_cleared, count))
+        }
     }
 
     private fun wirePermissionButtons() = with(binding) {
