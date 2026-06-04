@@ -30,11 +30,13 @@ class Pipeline(
     private val injector: TextInjector,
     private val onStateChanged: (State) -> Unit,
     private val onMessage: (String) -> Unit,
+    /** Smoothed 0..1 mic level, ~20 Hz while recording. Called on the capture thread. */
+    onAudioLevel: ((Float) -> Unit)? = null,
 ) {
 
     enum class State { IDLE, RECORDING, PROCESSING, ERROR }
 
-    private val recorder = Recorder(context)
+    private val recorder = Recorder(context).apply { levelListener = onAudioLevel }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var processingJob: Job? = null
     private var errorClearJob: Job? = null

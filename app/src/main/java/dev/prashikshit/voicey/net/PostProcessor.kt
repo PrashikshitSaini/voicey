@@ -102,7 +102,20 @@ class PostProcessor(private val settings: Settings) {
         if (choices.length() == 0) throw PostProcessException("Response 'choices' is empty")
         val message = choices.getJSONObject(0).optJSONObject("message")
             ?: throw PostProcessException("Response choice missing 'message'")
-        return message.optString("content").trim()
+        return stripThinkBlock(message.optString("content")).trim()
+    }
+
+    /**
+     * Reasoning models (qwen3, some DeepSeek variants) prepend a <think>…</think>
+     * block to their content. None are in our suggested model lists, but the field is
+     * free-text — without this strip, choosing one would paste the model's chain of
+     * thought into the user's text field. No-op for normal models.
+     */
+    private fun stripThinkBlock(content: String): String =
+        THINK_BLOCK_REGEX.replace(content, "")
+
+    private companion object {
+        val THINK_BLOCK_REGEX = Regex("""(?s)^\s*<think>.*?</think>""")
     }
 }
 

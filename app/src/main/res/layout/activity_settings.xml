@@ -93,8 +93,9 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:hint="@string/transcription_model_label">
-            <com.google.android.material.textfield.TextInputEditText
+            android:hint="@string/transcription_model_label"
+            app:endIconMode="dropdown_menu">
+            <com.google.android.material.textfield.MaterialAutoCompleteTextView
                 android:id="@+id/input_transcription_model"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -106,8 +107,9 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:hint="@string/cleanup_model_label">
-            <com.google.android.material.textfield.TextInputEditText
+            android:hint="@string/cleanup_model_label"
+            app:endIconMode="dropdown_menu">
+            <com.google.android.material.textfield.MaterialAutoCompleteTextView
                 android:id="@+id/input_cleanup_model"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -162,6 +164,20 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
             android:text="@string/hold_to_talk_label" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/switch_show_only_while_typing"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/show_only_while_typing_label" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/switch_sound_feedback"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/sound_feedback_label" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_toggle_bubble"

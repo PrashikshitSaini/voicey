@@ -1,6 +1,6 @@
 # Voicey
 
-Open-source AI dictation for Android. Speak into a floating bubble, get cleaned-up text pasted into any text field, in any app. Bring your own API key. No subscription. No telemetry. No "free for now."
+Open-source AI dictation for Android. A mic pill appears above your keyboard whenever you're typing — tap it, speak, and cleaned-up text lands in the focused field, in any app. Bring your own API key. No subscription. No telemetry. No "free for now."
 
 Inspired by [FreeFlow](https://github.com/zachlatta/freeflow) on macOS and the architecture of [Wispr Flow](https://wisprflow.ai)'s Android app — but free forever by construction.
 
@@ -60,8 +60,8 @@ adb install app/build/outputs/apk/debug/app-debug.apk
    - **Display over other apps** — for the floating bubble.
    - **Accessibility service** — Voicey needs to detect which text field is focused so it knows where to paste. It reads *only* the focused field's text and the app's package name. Nothing else.
 3. Tap **Start bubble**.
-4. A circle appears on your screen. Tap to start, tap again to stop — or enable **Hold to talk** in settings to record while you hold and stop on release.
-5. Drag the bubble anywhere. Long-press the screen edge to dock it.
+4. Open any app and tap a text field. The mic pill fades in just above the keyboard (and fades out when the keyboard closes — never mid-dictation). Tap to start, tap again to stop — or enable **Hold to talk** in settings to record while you hold and stop on release. While you speak, the pill shows a live waveform; gentle tones mark recording start/stop (can be turned off in settings).
+5. Drag the pill if it's ever in the way — it re-centers above the keyboard the next time one opens. Prefer the old always-visible behavior? Turn off **Show pill only while typing** in settings. The pill never appears over password fields.
 
 ## Providers
 

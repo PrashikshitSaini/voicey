@@ -26,6 +26,12 @@
     <string name="prompt_label">System prompt</string>
 
     <string name="hold_to_talk_label">Hold to talk (release to stop)</string>
+    <string name="show_only_while_typing_label">Show pill only while typing</string>
+    <string name="sound_feedback_label">Sound on record start/stop</string>
+
+    <string name="pill_tap_to_speak">Tap to speak</string>
+    <string name="pill_processing">Polishing…</string>
+    <string name="pill_error">Try again</string>
 
     <string name="permission_overlay_button">Grant overlay permission</string>
     <string name="permission_accessibility_button">Enable accessibility service</string>

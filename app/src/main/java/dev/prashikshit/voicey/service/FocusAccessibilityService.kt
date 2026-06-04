@@ -1,13 +1,19 @@
 package dev.prashikshit.voicey.service
 
 import android.accessibilityservice.AccessibilityService
+import android.graphics.Rect
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 
 /**
  * Tracks the currently focused input node and the package name of the foreground app
  * so the bubble service knows where dictated text will land and what context the
  * cleanup model should see.
+ *
+ * Also watches the window list for the IME (keyboard) window so the bubble can appear
+ * only while the user is actually typing, positioned just above the keyboard — and
+ * watches focus events for password fields so the bubble never shows over one.
  *
  * Exposes static accessors because the FloatingBubbleService needs synchronous access
  * at the moment the user releases the mic button — and an AccessibilityService instance
@@ -18,10 +24,15 @@ class FocusAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        refreshKeyboardState()
     }
 
     override fun onDestroy() {
         instance = null
+        // The detection signal is gone; report "no keyboard" so a keyboard-aware bubble
+        // doesn't stay stranded on screen (its service falls back to always-visible
+        // mode on its own when it sees isEnabled() == false).
+        updateKeyboardState(visible = false, top = NO_KEYBOARD_TOP)
         super.onDestroy()
     }
 
@@ -33,6 +44,44 @@ class FocusAccessibilityService : AccessibilityService() {
         if (event == null) return
         val pkg = event.packageName?.toString()
         if (!pkg.isNullOrEmpty()) lastPackageName = pkg
+
+        when (event.eventType) {
+            AccessibilityEvent.TYPE_WINDOWS_CHANGED -> refreshKeyboardState()
+            AccessibilityEvent.TYPE_VIEW_FOCUSED -> {
+                val source = event.source ?: return
+                passwordFieldFocused = source.isPassword
+                @Suppress("DEPRECATION")
+                source.recycle()
+                notifyListener()
+            }
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
+                // App/window switch — any remembered password-field focus is stale.
+                if (passwordFieldFocused) {
+                    passwordFieldFocused = false
+                    notifyListener()
+                }
+            }
+        }
+    }
+
+    /**
+     * Scans the interactive window list for the IME window. A zero-height window is
+     * treated as "no keyboard" — some IMEs briefly report an empty frame mid-animation.
+     */
+    private fun refreshKeyboardState() {
+        val bounds = Rect()
+        var visible = false
+        var top = NO_KEYBOARD_TOP
+        for (window in windows ?: emptyList()) {
+            if (window.type != AccessibilityWindowInfo.TYPE_INPUT_METHOD) continue
+            window.getBoundsInScreen(bounds)
+            if (bounds.height() > 0) {
+                visible = true
+                top = bounds.top
+            }
+            break
+        }
+        updateKeyboardState(visible, top)
     }
 
     companion object {
@@ -41,6 +90,62 @@ class FocusAccessibilityService : AccessibilityService() {
 
         @Volatile
         private var lastPackageName: String = ""
+
+        /** Screen-Y of the keyboard's top edge, or [NO_KEYBOARD_TOP] when closed/unknown. */
+        const val NO_KEYBOARD_TOP = -1
+
+        @Volatile
+        private var keyboardVisible: Boolean = false
+
+        @Volatile
+        private var keyboardTop: Int = NO_KEYBOARD_TOP
+
+        @Volatile
+        private var passwordFieldFocused: Boolean = false
+
+        /**
+         * Notified with (shouldShowBubble, keyboardTop) whenever keyboard visibility,
+         * keyboard bounds, or password-field focus changes. shouldShowBubble is false
+         * over password fields even while the keyboard is open. Invoked on the main
+         * thread (accessibility callbacks and the bubble service share it).
+         */
+        @Volatile
+        private var keyboardListener: ((Boolean, Int) -> Unit)? = null
+
+        private var lastNotifiedShow: Boolean? = null
+        private var lastNotifiedTop: Int = NO_KEYBOARD_TOP
+
+        /** Registers [listener] and immediately delivers the current state to it. */
+        fun setKeyboardListener(listener: ((Boolean, Int) -> Unit)?) {
+            keyboardListener = listener
+            lastNotifiedShow = null
+            lastNotifiedTop = NO_KEYBOARD_TOP
+            if (listener != null) {
+                val show = shouldShowBubble()
+                val top = keyboardTop
+                lastNotifiedShow = show
+                lastNotifiedTop = top
+                listener(show, top)
+            }
+        }
+
+        private fun shouldShowBubble(): Boolean = keyboardVisible && !passwordFieldFocused
+
+        private fun updateKeyboardState(visible: Boolean, top: Int) {
+            keyboardVisible = visible
+            keyboardTop = top
+            notifyListener()
+        }
+
+        private fun notifyListener() {
+            val listener = keyboardListener ?: return
+            val show = shouldShowBubble()
+            val top = keyboardTop
+            if (show == lastNotifiedShow && top == lastNotifiedTop) return
+            lastNotifiedShow = show
+            lastNotifiedTop = top
+            listener(show, top)
+        }
 
         fun isEnabled(): Boolean = instance != null
 

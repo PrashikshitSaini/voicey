@@ -19,6 +19,10 @@ data class Settings(
     /** ISO-639-1 language code (e.g. "en", "hi", "es"). Pinned on Whisper requests to
      *  suppress language-detection hallucinations on short clips. */
     val language: String,
+    /** Show the pill only while a keyboard is open (requires the accessibility service). */
+    val showOnlyWhileTyping: Boolean,
+    /** Play the gentle start/stop recording cues. */
+    val soundFeedback: Boolean,
 ) {
     fun isReady(): Boolean = apiKey.isNotBlank() && apiBase.isNotBlank()
 
@@ -27,6 +31,24 @@ data class Settings(
         const val DEFAULT_TRANSCRIPTION_MODEL = "whisper-large-v3-turbo"
         const val DEFAULT_CLEANUP_MODEL = "llama-3.3-70b-versatile"
         const val DEFAULT_LANGUAGE = "en"
+
+        /**
+         * Dropdown suggestions for the model fields (Groq catalog; both fields stay
+         * free-text for other providers). Ordered fast → best. Reasoning models that
+         * emit <think> blocks (e.g. qwen3) are deliberately excluded from suggestions —
+         * PostProcessor strips think tags defensively, but they'd still burn latency.
+         */
+        val TRANSCRIPTION_MODEL_SUGGESTIONS = listOf(
+            "whisper-large-v3-turbo",
+            "whisper-large-v3",
+        )
+        val CLEANUP_MODEL_SUGGESTIONS = listOf(
+            "llama-3.1-8b-instant",
+            "llama-3.3-70b-versatile",
+            "meta-llama/llama-4-scout-17b-16e-instruct",
+            "openai/gpt-oss-20b",
+            "openai/gpt-oss-120b",
+        )
 
         /**
          * Default cleanup prompt. Lifted with light edits from FreeFlow's simple post-processing prompt
@@ -62,6 +84,8 @@ Output rules:
                 systemPrompt = store.getString(KEY_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT),
                 holdToTalk = store.getBoolean(KEY_HOLD_TO_TALK, true),
                 language = store.getString(KEY_LANGUAGE, DEFAULT_LANGUAGE),
+                showOnlyWhileTyping = store.getBoolean(KEY_SHOW_ONLY_WHILE_TYPING, true),
+                soundFeedback = store.getBoolean(KEY_SOUND_FEEDBACK, true),
             )
         }
 
@@ -75,6 +99,8 @@ Output rules:
             store.putString(KEY_SYSTEM_PROMPT, settings.systemPrompt)
             store.putBoolean(KEY_HOLD_TO_TALK, settings.holdToTalk)
             store.putString(KEY_LANGUAGE, settings.language.trim().ifBlank { DEFAULT_LANGUAGE })
+            store.putBoolean(KEY_SHOW_ONLY_WHILE_TYPING, settings.showOnlyWhileTyping)
+            store.putBoolean(KEY_SOUND_FEEDBACK, settings.soundFeedback)
         }
 
         private const val KEY_API_BASE = "api_base"
@@ -85,5 +111,7 @@ Output rules:
         private const val KEY_SYSTEM_PROMPT = "system_prompt"
         private const val KEY_HOLD_TO_TALK = "hold_to_talk"
         private const val KEY_LANGUAGE = "language"
+        private const val KEY_SHOW_ONLY_WHILE_TYPING = "show_only_while_typing"
+        private const val KEY_SOUND_FEEDBACK = "sound_feedback"
     }
 }

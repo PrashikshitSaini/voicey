@@ -17,6 +17,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
+import android.widget.TextView
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -25,11 +26,18 @@ import dev.prashikshit.voicey.R
 import dev.prashikshit.voicey.SettingsActivity
 import dev.prashikshit.voicey.VoiceyApp
 import dev.prashikshit.voicey.data.Settings
+import dev.prashikshit.voicey.ui.SpectrumView
 import kotlin.math.abs
 
 /**
- * Foreground service that draws a draggable mic bubble on top of every app. Tap to
- * toggle recording; long-press (when "hold to talk" is on) to record while held.
+ * Foreground service that draws the dictation pill on top of every app. Tap to toggle
+ * recording; long-press (when "hold to talk" is on) to record while held.
+ *
+ * When "show only while typing" is enabled and the accessibility service is connected,
+ * the pill appears centered above the keyboard the moment it opens and hides the moment
+ * it closes (never mid-dictation — recording/processing pin it visible). If keyboard
+ * detection is unavailable (accessibility off) the pill falls back to always-visible,
+ * so a detection failure can never strand the user with an invisible control.
  *
  * Runs as a foreground service with a persistent low-importance notification because
  * SYSTEM_ALERT_WINDOW overlays drawn by background services get torn down on modern
@@ -39,6 +47,8 @@ class FloatingBubbleService : LifecycleService() {
 
     private lateinit var windowManager: WindowManager
     private lateinit var bubbleView: FrameLayout
+    private lateinit var bubbleLabel: TextView
+    private lateinit var bubbleSpectrum: SpectrumView
     private lateinit var layoutParams: WindowManager.LayoutParams
     private lateinit var injector: TextInjector
     private lateinit var pipeline: Pipeline
@@ -54,10 +64,21 @@ class FloatingBubbleService : LifecycleService() {
     private val longPressMs = 350L
     private val longPressRunnable = Runnable { startHoldToTalk() }
 
+    private val density: Float get() = resources.displayMetrics.density
+    private val pillWidthPx: Int get() = (PILL_WIDTH_DP * density).toInt()
+    private val pillHeightPx: Int get() = (PILL_HEIGHT_DP * density).toInt()
+
     // Cached on service start so we don't decrypt EncryptedSharedPreferences on every
     // ACTION_DOWN event. Setting changes apply on bubble restart.
     @Volatile
     private var holdToTalkEnabled: Boolean = true
+    private var showOnlyWhileTyping: Boolean = true
+
+    /** Null when the user has disabled sound feedback in settings. */
+    private var soundFeedback: SoundFeedback? = null
+
+    /** Last keyboard state delivered by the accessibility service. Main thread only. */
+    private var keyboardWantsBubble = false
 
     override fun onCreate() {
         super.onCreate()
@@ -73,9 +94,16 @@ class FloatingBubbleService : LifecycleService() {
             injector = injector,
             onStateChanged = ::renderState,
             onMessage = ::showTransientMessage,
+            onAudioLevel = ::onAudioLevel,
         )
-        holdToTalkEnabled = Settings.load(this).holdToTalk
+        val settings = Settings.load(this)
+        holdToTalkEnabled = settings.holdToTalk
+        showOnlyWhileTyping = settings.showOnlyWhileTyping
+        if (settings.soundFeedback) soundFeedback = SoundFeedback(this)
         addBubble()
+        // Delivers the current keyboard state immediately, so the pill starts hidden
+        // when no keyboard is open (and positioned correctly when one already is).
+        FocusAccessibilityService.setKeyboardListener(::onKeyboardStateChanged)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -93,7 +121,10 @@ class FloatingBubbleService : LifecycleService() {
     }
 
     override fun onDestroy() {
+        FocusAccessibilityService.setKeyboardListener(null)
         mainHandler.removeCallbacksAndMessages(null)
+        soundFeedback?.release()
+        soundFeedback = null
         pipeline.shutdown()
         if (::bubbleView.isInitialized && bubbleView.isAttachedToWindow) {
             windowManager.removeView(bubbleView)
@@ -212,6 +243,8 @@ class FloatingBubbleService : LifecycleService() {
 
     private fun addBubble() {
         bubbleView = LayoutInflater.from(this).inflate(R.layout.bubble_overlay, null) as FrameLayout
+        bubbleLabel = bubbleView.findViewById(R.id.bubble_label)
+        bubbleSpectrum = bubbleView.findViewById(R.id.bubble_spectrum)
 
         val overlayType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -219,21 +252,87 @@ class FloatingBubbleService : LifecycleService() {
             @Suppress("DEPRECATION")
             WindowManager.LayoutParams.TYPE_PHONE
         }
+        // Explicit pixel dimensions, NOT WRAP_CONTENT: a layout inflated with a null
+        // parent has its root layout_width/height ignored, so a WRAP_CONTENT window
+        // collapses to the icon's size — the old bubble's touch target was 28dp for
+        // exactly this reason. Fixed size guarantees the full pill is tappable.
         layoutParams = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
+            pillWidthPx,
+            pillHeightPx,
             overlayType,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = 24
-            y = resources.displayMetrics.heightPixels / 3
+            x = (resources.displayMetrics.widthPixels - pillWidthPx) / 2
+            y = resources.displayMetrics.heightPixels - pillHeightPx - (FALLBACK_BOTTOM_MARGIN_DP * density).toInt()
         }
 
         bubbleView.setOnTouchListener(::handleTouch)
+        // Start invisible when keyboard-aware mode will decide visibility; the listener
+        // registration in onCreate immediately delivers the real state.
+        if (keyboardAwareActive()) {
+            bubbleView.visibility = View.GONE
+            bubbleView.alpha = 0f
+        }
         windowManager.addView(bubbleView, layoutParams)
+    }
+
+    /**
+     * Keyboard-aware mode needs both the user preference and a live accessibility
+     * connection. Without the connection there is no keyboard signal, so we degrade
+     * to the always-visible bubble rather than hiding a control we can't restore.
+     */
+    private fun keyboardAwareActive(): Boolean =
+        showOnlyWhileTyping && FocusAccessibilityService.isEnabled()
+
+    /** Called on the main thread by FocusAccessibilityService on every keyboard change. */
+    private fun onKeyboardStateChanged(shouldShow: Boolean, keyboardTop: Int) {
+        keyboardWantsBubble = shouldShow
+        if (shouldShow && keyboardTop != FocusAccessibilityService.NO_KEYBOARD_TOP) {
+            positionAboveKeyboard(keyboardTop)
+        }
+        applyBubbleVisibility()
+    }
+
+    private fun positionAboveKeyboard(keyboardTop: Int) {
+        layoutParams.x = (resources.displayMetrics.widthPixels - pillWidthPx) / 2
+        layoutParams.y = (keyboardTop - pillHeightPx - (PILL_KEYBOARD_MARGIN_DP * density).toInt())
+            .coerceAtLeast(0)
+        if (::bubbleView.isInitialized && bubbleView.isAttachedToWindow) {
+            windowManager.updateViewLayout(bubbleView, layoutParams)
+        }
+    }
+
+    private fun desiredVisible(): Boolean {
+        if (!keyboardAwareActive()) return true
+        // Never yank the pill mid-dictation: recording and processing pin it visible.
+        if (currentState == Pipeline.State.RECORDING || currentState == Pipeline.State.PROCESSING) {
+            return true
+        }
+        return keyboardWantsBubble
+    }
+
+    private fun applyBubbleVisibility() {
+        if (!::bubbleView.isInitialized) return
+        if (desiredVisible()) {
+            // Skip if already fully shown; otherwise cancel any in-flight hide-fade —
+            // without the cancel, a fade ending after this call would strand the pill
+            // at alpha 0 while still VISIBLE (invisible but swallowing touches).
+            if (bubbleView.visibility == View.VISIBLE && bubbleView.alpha == 1f) return
+            bubbleView.animate().cancel()
+            bubbleView.visibility = View.VISIBLE
+            bubbleView.animate().alpha(1f).setDuration(FADE_MS).start()
+        } else if (bubbleView.visibility == View.VISIBLE) {
+            bubbleView.animate().cancel()
+            bubbleView.animate().alpha(0f).setDuration(FADE_MS)
+                .withEndAction {
+                    // Re-check: state may have flipped back to visible during the fade.
+                    if (!desiredVisible()) bubbleView.visibility = View.GONE
+                }
+                .start()
+        }
     }
 
     private fun handleTouch(view: View, event: MotionEvent): Boolean {
@@ -272,7 +371,9 @@ class FloatingBubbleService : LifecycleService() {
                         pipeline.stopAndProcess()
                         isLongPressing = false
                     }
-                    isDragging -> dockToNearestEdge()
+                    // Drag end: the pill stays where the user dropped it. It re-anchors
+                    // above the keyboard on the next keyboard-open event.
+                    isDragging -> Unit
                     else -> toggleRecording()
                 }
                 isDragging = false
@@ -301,6 +402,7 @@ class FloatingBubbleService : LifecycleService() {
     private var currentState: Pipeline.State = Pipeline.State.IDLE
 
     private fun renderState(state: Pipeline.State) {
+        val previousState = currentState
         currentState = state
 
         // Only claim the microphone foreground-service type while we're actually
@@ -310,6 +412,12 @@ class FloatingBubbleService : LifecycleService() {
         startInForeground(includeMicrophone = state == Pipeline.State.RECORDING)
 
         mainHandler.post {
+            if (state == Pipeline.State.RECORDING && previousState != Pipeline.State.RECORDING) {
+                soundFeedback?.playStart()
+            } else if (state != Pipeline.State.RECORDING && previousState == Pipeline.State.RECORDING) {
+                soundFeedback?.playStop()
+            }
+
             val colorRes = when (state) {
                 Pipeline.State.IDLE -> R.color.bubble_idle
                 Pipeline.State.RECORDING -> R.color.bubble_recording
@@ -319,7 +427,33 @@ class FloatingBubbleService : LifecycleService() {
             val background = ContextCompat.getDrawable(this, R.drawable.bubble_background)?.mutate()
             background?.setTint(ContextCompat.getColor(this, colorRes))
             bubbleView.background = background
+
+            if (state == Pipeline.State.RECORDING) {
+                bubbleLabel.visibility = View.GONE
+                bubbleSpectrum.visibility = View.VISIBLE
+                bubbleSpectrum.startAnimating()
+            } else {
+                bubbleSpectrum.stopAnimating()
+                bubbleSpectrum.visibility = View.GONE
+                bubbleLabel.visibility = View.VISIBLE
+                bubbleLabel.setText(
+                    when (state) {
+                        Pipeline.State.PROCESSING -> R.string.pill_processing
+                        Pipeline.State.ERROR -> R.string.pill_error
+                        else -> R.string.pill_tap_to_speak
+                    }
+                )
+            }
+
+            // A state change can flip visibility: e.g. the keyboard closed mid-recording
+            // (pill stayed pinned) and the pipeline just returned to IDLE — hide now.
+            applyBubbleVisibility()
         }
+    }
+
+    /** Forwards the mic level to the spectrum. Called on the recorder's capture thread. */
+    private fun onAudioLevel(level: Float) {
+        if (::bubbleSpectrum.isInitialized) bubbleSpectrum.setLevel(level)
     }
 
     private fun showTransientMessage(message: String) {
@@ -328,21 +462,15 @@ class FloatingBubbleService : LifecycleService() {
         }
     }
 
-    private fun dockToNearestEdge() {
-        val screenWidth = resources.displayMetrics.widthPixels
-        val bubbleWidth = bubbleView.width.takeIf { it > 0 } ?: (resources.displayMetrics.density * 56).toInt()
-        layoutParams.x = if (layoutParams.x + bubbleWidth / 2 < screenWidth / 2) {
-            0
-        } else {
-            screenWidth - bubbleWidth
-        }
-        windowManager.updateViewLayout(bubbleView, layoutParams)
-    }
-
     companion object {
         private const val ACTION_STOP = "dev.prashikshit.voicey.STOP_BUBBLE"
         private const val RESTART_REQUEST_CODE = 200
         private const val RESTART_DELAY_MS = 1_000L
+        private const val PILL_WIDTH_DP = 160
+        private const val PILL_HEIGHT_DP = 48
+        private const val PILL_KEYBOARD_MARGIN_DP = 12
+        private const val FALLBACK_BOTTOM_MARGIN_DP = 120
+        private const val FADE_MS = 150L
 
         fun start(context: Context) {
             val intent = Intent(context, FloatingBubbleService::class.java)

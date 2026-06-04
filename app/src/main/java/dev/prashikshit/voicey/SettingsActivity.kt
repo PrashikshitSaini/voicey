@@ -9,6 +9,8 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings as AndroidSettings
+import android.widget.ArrayAdapter
+import android.widget.Filter
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
@@ -47,6 +49,7 @@ class SettingsActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         bindFields(Settings.load(this))
+        wireModelDropdowns()
         wirePermissionButtons()
         wireBubbleToggle()
         wireResetButton()
@@ -66,12 +69,30 @@ class SettingsActivity : AppCompatActivity() {
     private fun bindFields(settings: Settings) = with(binding) {
         inputApiBase.setText(settings.apiBase)
         inputApiKey.setText(settings.apiKey)
-        inputTranscriptionModel.setText(settings.transcriptionModel)
-        inputCleanupModel.setText(settings.cleanupModel)
+        // Second arg `false` skips the autocomplete filter so binding a saved value
+        // doesn't pop the suggestion list open underneath it.
+        inputTranscriptionModel.setText(settings.transcriptionModel, false)
+        inputCleanupModel.setText(settings.cleanupModel, false)
         inputLanguage.setText(settings.language)
         inputVocabulary.setText(settings.vocabulary.joinToString("\n"))
         inputPrompt.setText(settings.systemPrompt)
         switchHoldToTalk.isChecked = settings.holdToTalk
+        switchShowOnlyWhileTyping.isChecked = settings.showOnlyWhileTyping
+        switchSoundFeedback.isChecked = settings.soundFeedback
+    }
+
+    /**
+     * Model fields are editable autocompletes: pick a Groq suggestion from the dropdown
+     * or type any model id for other providers. The adapter never filters, so tapping
+     * the field (or its arrow) always offers the full list even when text is present.
+     */
+    private fun wireModelDropdowns() {
+        binding.inputTranscriptionModel.setAdapter(
+            NoFilterArrayAdapter(this, Settings.TRANSCRIPTION_MODEL_SUGGESTIONS)
+        )
+        binding.inputCleanupModel.setAdapter(
+            NoFilterArrayAdapter(this, Settings.CLEANUP_MODEL_SUGGESTIONS)
+        )
     }
 
     private fun save() {
@@ -87,6 +108,8 @@ class SettingsActivity : AppCompatActivity() {
             holdToTalk = binding.switchHoldToTalk.isChecked,
             language = binding.inputLanguage.text?.toString().orEmpty()
                 .ifBlank { Settings.DEFAULT_LANGUAGE },
+            showOnlyWhileTyping = binding.switchShowOnlyWhileTyping.isChecked,
+            soundFeedback = binding.switchSoundFeedback.isChecked,
         )
         Settings.save(this, current)
     }
@@ -248,5 +271,33 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun toast(message: String) {
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+    }
+
+    /**
+     * An ArrayAdapter whose filter always returns every item. AutoCompleteTextView
+     * normally filters suggestions by the current text, which would hide all options
+     * once a saved model id fills the field — for a pick-or-type dropdown we always
+     * want the full list.
+     */
+    private class NoFilterArrayAdapter(
+        context: Context,
+        items: List<String>,
+    ) : ArrayAdapter<String>(context, android.R.layout.simple_list_item_1, items) {
+
+        private val allItems = items.toList()
+
+        private val noFilter = object : Filter() {
+            override fun performFiltering(constraint: CharSequence?): FilterResults =
+                FilterResults().apply {
+                    values = allItems
+                    count = allItems.size
+                }
+
+            override fun publishResults(constraint: CharSequence?, results: FilterResults?) {
+                notifyDataSetChanged()
+            }
+        }
+
+        override fun getFilter(): Filter = noFilter
     }
 }

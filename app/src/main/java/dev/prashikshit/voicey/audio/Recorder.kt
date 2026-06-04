@@ -28,9 +28,17 @@ class Recorder(private val context: Context) {
     private var outputFile: File? = null
     private var pcmBytesWritten: Long = 0L
     private var captureThread: Thread? = null
+    private val levelNormalizer = AudioLevelNormalizer()
 
     @Volatile
     private var running: Boolean = false
+
+    /**
+     * Receives a smoothed 0..1 microphone level roughly every 50 ms while recording.
+     * Invoked on the capture thread — consumers must hop to their own thread.
+     */
+    @Volatile
+    var levelListener: ((Float) -> Unit)? = null
 
     @SuppressLint("MissingPermission")
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
@@ -79,15 +87,21 @@ class Recorder(private val context: Context) {
         pcmBytesWritten = 0L
         record = ar
         running = true
+        levelNormalizer.reset()
 
         captureThread = thread(name = "voicey-recorder", isDaemon = true) {
-            val buf = ByteArray(bufferSize)
+            // Read in ~50 ms chunks (rather than the full internal buffer) so the level
+            // listener gets ~20 updates/sec for a responsive waveform. The AudioRecord's
+            // internal buffer keeps the larger [bufferSize], so no audio is dropped —
+            // this only changes how often we drain it. File content is byte-identical.
+            val buf = ByteArray(LEVEL_CHUNK_BYTES)
             FileOutputStream(out, true).use { fos ->
                 while (running) {
                     val read = ar.read(buf, 0, buf.size)
                     if (read > 0) {
                         fos.write(buf, 0, read)
                         pcmBytesWritten += read
+                        publishLevel(buf, read)
                     } else if (read < 0) {
                         // Read error — surface as silent abort; caller observes empty file.
                         break
@@ -95,6 +109,25 @@ class Recorder(private val context: Context) {
                 }
             }
         }
+    }
+
+    /** Computes chunk RMS and forwards the normalized level. Skips work when unobserved. */
+    private fun publishLevel(buf: ByteArray, read: Int) {
+        val listener = levelListener ?: return
+        var sumSquares = 0.0
+        var sampleCount = 0
+        var i = 0
+        while (i + 1 < read) {
+            // 16-bit little-endian PCM.
+            val sample = ((buf[i + 1].toInt() shl 8) or (buf[i].toInt() and 0xFF)).toShort()
+            val normalized = sample / 32768.0
+            sumSquares += normalized * normalized
+            sampleCount++
+            i += 2
+        }
+        if (sampleCount == 0) return
+        val rms = kotlin.math.sqrt(sumSquares / sampleCount).toFloat()
+        listener(levelNormalizer.normalizedLevel(rms))
     }
 
     /**
@@ -161,5 +194,8 @@ class Recorder(private val context: Context) {
         const val WAV_HEADER_BYTES = 44
         const val MIN_BUFFER_BYTES = 8_192
         const val STOP_JOIN_TIMEOUT_MS = 500L
+
+        /** 50 ms of 16 kHz / 16-bit / mono PCM — the level-update cadence. */
+        const val LEVEL_CHUNK_BYTES = 1_600
     }
 }
