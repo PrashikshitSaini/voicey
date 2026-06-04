@@ -70,7 +70,9 @@ class FocusAccessibilityService : AccessibilityService() {
                 }
             }
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
-                CorrectionLearner.onAppChanged(pkg)
+                // Deliberately NOT a learner session boundary: the keyboard and our
+                // own pill fire window-state events from their packages mid-editing,
+                // which killed sessions the moment the user started correcting.
                 // App/window switch — any remembered password-field focus is stale.
                 if (passwordFieldFocused) {
                     passwordFieldFocused = false

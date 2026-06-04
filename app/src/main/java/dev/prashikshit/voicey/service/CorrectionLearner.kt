@@ -39,6 +39,12 @@ object CorrectionLearner {
         val insertedTokens: Set<String>,
         /** Reconstruction of the field at insertion time: before + inserted + after. */
         val originalText: String,
+        /**
+         * First text-change event after insertion — normally the paste itself, i.e.
+         * the field's literal post-insertion state. Preferred diff baseline over
+         * [originalText], whose reconstruction suffers truncation artifacts.
+         */
+        var baselineText: String? = null,
         var latestText: String? = null,
     )
 
@@ -73,18 +79,12 @@ object CorrectionLearner {
     /** Fed by the accessibility service on every TYPE_VIEW_TEXT_CHANGED event. */
     fun onTextChanged(packageName: String?, text: String) {
         val active = session ?: return
-        if (packageName != active.packageName) {
-            // The user is typing in a different app — their editing pass is over.
-            finalizeSession()
-            return
+        if (packageName != active.packageName) return
+        if (active.baselineText == null) {
+            active.baselineText = text
+        } else {
+            active.latestText = text
         }
-        active.latestText = text
-    }
-
-    /** Called when the user switches apps. Same-app window changes keep the session. */
-    fun onAppChanged(packageName: String?) {
-        val active = session ?: return
-        if (packageName != null && packageName != active.packageName) finalizeSession()
     }
 
     /** Called when the keyboard closes — the editing pass is over. */
@@ -96,10 +96,25 @@ object CorrectionLearner {
         mainHandler.removeCallbacks(timeoutRunnable)
         val ended = session ?: return
         session = null
-        // No text-change event ever arrived (common in WebViews, which don't emit
-        // reliable TYPE_VIEW_TEXT_CHANGED) — nothing observable, nothing to learn.
-        val finalText = ended.latestText ?: return
-        val learned = diffCorrections(ended.originalText, finalText, ended.insertedTokens)
+        // Diff strategy by how many events we observed:
+        //  - 2+ events: first event (the paste landing) vs last — pure ground truth.
+        //  - 1 event: it's either the bare paste (diff vs reconstruction ≈ identity,
+        //    learns nothing) or a single-burst edit like an autocorrect tap (learns).
+        //  - 0 events: field is unobservable (common in WebViews) — nothing to learn.
+        val baseline: String
+        val finalText: String
+        when {
+            ended.latestText != null -> {
+                baseline = ended.baselineText ?: ended.originalText
+                finalText = ended.latestText!!
+            }
+            ended.baselineText != null -> {
+                baseline = ended.originalText
+                finalText = ended.baselineText!!
+            }
+            else -> return
+        }
+        val learned = diffCorrections(baseline, finalText, ended.insertedTokens)
         if (learned.isEmpty()) return
 
         // EncryptedSharedPreferences setup is too heavy for the main thread; persist in

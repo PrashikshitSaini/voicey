@@ -18,4 +18,10 @@ metadata:
 
 **How to apply:** before modifying bubble visibility, positioning, or recorder internals, re-read these spots and preserve the invariants above.
 
+**2026-06-04 on-device debugging lessons (do not relearn these):**
+- `FocusAccessibilityService.currentPackageName()` is event-stream noise — the last event before any action is usually Voicey's own pill re-render or the keyboard package. For "which app is the user in", ALWAYS use `focusedNode.packageName`. This bug silently killed correction learning v1.
+- Never use TYPE_WINDOW_STATE_CHANGED as an app-switch/session boundary — Samsung keyboard and our own windows fire it mid-editing. Keyboard-close + timeout are the reliable boundaries.
+- Samsung keyboard's clipboard panel snapshots every primaryClip change and ignores EXTRA_IS_SENSITIVE for its own UI — the only real fix is not transiting the clipboard (tier-0 SET_TEXT for empty fields). Background apps can't READ the clipboard on Android 10+ (restore path is dead code on modern devices; clear is the live path).
+- Tier-0 direct SET_TEXT MUST keep the `isEditable` gate: WebView virtual nodes leave it false and may hide real content behind empty-looking node.text — without the gate, SET_TEXT destroys user data.
+
 **2026-06-04 addendum (same branch):** clipboard now restore-or-clear after paste (TextInjector — never walk back to SET_TEXT splicing, placeholder bug); CorrectionLearner learns spelling fixes from post-dictation edits (LCS token diff scoped to inserted tokens, precision-first thresholds, 45s session). Invariants: `wantsTextFrom()` gate must stay BEFORE `event.source` fetch in TYPE_VIEW_TEXT_CHANGED (fires every keystroke system-wide); learned terms must stay OUT of the Whisper prompt (echo/hallucination vector — cleanup KNOWN_CORRECTIONS only); the clear-corrections button is the escape hatch for bad learns — never remove it. Learner expects on-device threshold tuning; won't fire in WebViews (no reliable text-change events).

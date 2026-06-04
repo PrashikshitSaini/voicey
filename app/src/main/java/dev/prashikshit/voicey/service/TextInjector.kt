@@ -14,7 +14,11 @@ import android.view.accessibility.AccessibilityNodeInfo
 /**
  * Writes the transcribed text into the currently focused field.
  *
- * Two-tier strategy, paste-first:
+ * Three-tier strategy:
+ *
+ *   0. **Direct ACTION_SET_TEXT for confidently empty native fields** — no clipboard
+ *      transit at all. Covers the most common dictation case; see [isConfidentlyEmpty]
+ *      for why this can never destroy content or resurrect the placeholder bug.
  *
  *   1. **Clipboard + ACTION_PASTE** — the primary path. ACTION_PASTE is the platform's
  *      native "insert at cursor" action: it preserves existing typed content, naturally
@@ -46,20 +50,51 @@ class TextInjector(context: Context) {
         if (text.isEmpty()) return InsertionResult.SKIPPED_EMPTY
         if (node == null) return InsertionResult.NO_FOCUSED_NODE
 
+        // Tier 0: confidently empty native field → direct SET_TEXT, NO clipboard.
+        // This is the common dictation case (empty reply box) and keeps the text out
+        // of Samsung/Gboard clipboard panels entirely, which snapshot every clip
+        // change regardless of the sensitive flag. Paste's append semantics are only
+        // needed when there is existing content to preserve — an empty field has none.
+        if (isConfidentlyEmpty(node) && setTextDirectly(node, text)) {
+            return InsertionResult.WROTE
+        }
+
         // Tier 1: clipboard + paste. Appends at cursor, preserves existing text.
         if (pasteViaClipboard(node, text)) return InsertionResult.WROTE
 
         // Tier 2: SET_TEXT fallback. Replaces content. Rare path — only triggered
         // when the focused node has no working paste handler.
+        if (setTextDirectly(node, text)) return InsertionResult.WROTE
+
+        return InsertionResult.FAILED
+    }
+
+    /**
+     * True only when we can TRUST that the field is empty. Gated on [AccessibilityNodeInfo.isEditable]
+     * because WebView virtual nodes typically leave it false AND often refuse to expose
+     * their text — an opaque web field that *looks* empty may hold real content that a
+     * SET_TEXT would destroy, so those always take the append-safe paste path. For
+     * native fields, empty/hint-showing text genuinely means empty (mirrors
+     * ContextReader.userEnteredText). Compose placeholders that masquerade as content
+     * fail these checks and fall through to paste — the placeholder-prepend bug class
+     * stays structurally impossible because no tier ever concatenates node.text.
+     */
+    private fun isConfidentlyEmpty(node: AccessibilityNodeInfo): Boolean {
+        if (!node.isEditable) return false
+        val text = node.text?.toString().orEmpty()
+        if (text.isEmpty()) return true
+        if (node.isShowingHintText) return true
+        val hint = node.hintText?.toString().orEmpty()
+        return hint.isNotEmpty() && hint == text
+    }
+
+    private fun setTextDirectly(node: AccessibilityNodeInfo, text: String): Boolean {
         val setArgs = Bundle().apply {
             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
         }
-        if (node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, setArgs)) {
-            moveCaretToEnd(node, text.length)
-            return InsertionResult.WROTE
-        }
-
-        return InsertionResult.FAILED
+        if (!node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, setArgs)) return false
+        moveCaretToEnd(node, text.length)
+        return true
     }
 
     /** Returns true if the paste succeeded. Always schedules a clipboard restore. */

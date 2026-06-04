@@ -101,7 +101,13 @@ class Pipeline(
                 }
 
                 val focusedNode = FocusAccessibilityService.findFocusedEditable()
-                val ctx = ContextReader.read(focusedNode, FocusAccessibilityService.currentPackageName())
+                // The node's own package is ground truth for "which app are we typing
+                // into". currentPackageName() is event-stream noise — the last event
+                // before insertion is usually from Voicey's own pill re-rendering or
+                // the keyboard, which broke correction learning and context labeling.
+                val targetPackage = focusedNode?.packageName?.toString()
+                    ?: FocusAccessibilityService.currentPackageName()
+                val ctx = ContextReader.read(focusedNode, targetPackage)
 
                 val cleaned = postProcessor.clean(raw, ctx)
                 val toInsert = cleaned.ifBlank { raw }
@@ -115,7 +121,7 @@ class Pipeline(
                             CorrectionLearner.onTextInserted(
                                 context = context,
                                 inserted = toInsert,
-                                packageName = FocusAccessibilityService.currentPackageName(),
+                                packageName = targetPackage,
                                 textBefore = ctx.textBefore,
                                 textAfter = ctx.textAfter,
                             )
