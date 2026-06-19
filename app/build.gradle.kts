@@ -11,8 +11,8 @@ android {
         applicationId = "dev.prashikshit.voicey"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 8
+        versionName = "0.1.8"
         vectorDrawables.useSupportLibrary = true
     }
 

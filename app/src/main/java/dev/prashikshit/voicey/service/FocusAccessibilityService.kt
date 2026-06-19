@@ -197,7 +197,17 @@ class FocusAccessibilityService : AccessibilityService() {
                 node.recycle()
             }
 
-            return findFocusedInputInWindows(svc)
+            // Tier 2: a *focused* descendant that looks like a text input.
+            findFocusedInputInWindows(svc)?.let { return it }
+
+            // Tier 3: last resort for editors that never report input focus. Rich-text
+            // surfaces (e.g. Samsung Notes) expose an editable node in the accessibility
+            // tree but leave isFocused() false on it — focus sits on a container — so
+            // tiers 1 and 2 miss it and dictation fails with "Tap a text field first".
+            // This drops the isFocused() requirement and takes the first text input in
+            // the active app window instead. Reached ONLY when the focus-based tiers found
+            // nothing, so apps that already work return above and are unaffected by it.
+            return findTextInputInActiveWindow(svc)
         }
 
         fun currentPackageName(): String = lastPackageName
@@ -253,6 +263,48 @@ class FocusAccessibilityService : AccessibilityService() {
                 action.id == AccessibilityNodeInfo.ACTION_SET_TEXT ||
                     action.id == AccessibilityNodeInfo.ACTION_PASTE
             }
+        }
+
+        /**
+         * Walks the active app window's accessibility tree and returns the first node that
+         * [looksLikeTextInput], WITHOUT requiring isFocused(). The IME (keyboard) window is
+         * skipped so we never target the keyboard's own views.
+         *
+         * Tier 3 fallback for [findFocusedEditable]: rich-text editors such as Samsung
+         * Notes keep their editable node in the tree but never mark it input-focused, so
+         * the focus-based tiers return null. Taking the first text input in the active
+         * window recovers dictation for those apps. Only invoked after the focus tiers
+         * fail, so it can't change behavior for apps that already resolve a focused node.
+         */
+        private fun findTextInputInActiveWindow(svc: AccessibilityService): AccessibilityNodeInfo? {
+            val windows = svc.windows ?: return null
+            for (window in windows) {
+                if (!window.isActive) continue
+                if (window.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD) continue
+                val root = window.root ?: continue
+                val match = findTextInputDescendant(root)
+                if (match != null) {
+                    if (match !== root) root.recycle()
+                    return match
+                }
+                root.recycle()
+            }
+            return null
+        }
+
+        /** Like [findFocusedTextInputDescendant] but without the isFocused() gate. */
+        private fun findTextInputDescendant(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+            if (looksLikeTextInput(node)) return node
+            for (i in 0 until node.childCount) {
+                val child = node.getChild(i) ?: continue
+                val match = findTextInputDescendant(child)
+                if (match != null) {
+                    if (match !== child) child.recycle()
+                    return match
+                }
+                child.recycle()
+            }
+            return null
         }
     }
 }
