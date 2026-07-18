@@ -207,7 +207,7 @@ class FocusAccessibilityService : AccessibilityService() {
             // This drops the isFocused() requirement and takes the first text input in
             // the active app window instead. Reached ONLY when the focus-based tiers found
             // nothing, so apps that already work return above and are unaffected by it.
-            return findTextInputInActiveWindow(svc)
+            return findTextInputInApplicationWindows(svc)
         }
 
         fun currentPackageName(): String = lastPackageName
@@ -259,16 +259,19 @@ class FocusAccessibilityService : AccessibilityService() {
             // actually advertises a text-mutation action. Chrome's virtual nodes for
             // <input> / <textarea> consistently expose ACTION_SET_TEXT or ACTION_PASTE
             // (or both) even when neither isEditable nor a recognizable className is set.
-            return node.actionList.any { action ->
+            return hasTextMutationAction(node)
+        }
+
+        private fun hasTextMutationAction(node: AccessibilityNodeInfo): Boolean =
+            node.actionList.any { action ->
                 action.id == AccessibilityNodeInfo.ACTION_SET_TEXT ||
                     action.id == AccessibilityNodeInfo.ACTION_PASTE
             }
-        }
 
         /**
-         * Walks the active app window's accessibility tree and returns the first node that
-         * [looksLikeTextInput], WITHOUT requiring isFocused(). The IME (keyboard) window is
-         * skipped so we never target the keyboard's own views.
+         * Walks application accessibility windows (active first) and returns the best node
+         * that [looksLikeTextInput], WITHOUT requiring isFocused(). The IME and Voicey's
+         * own overlay are skipped so we never target keyboard or pill views.
          *
          * Tier 3 fallback for [findFocusedEditable]: rich-text editors such as Samsung
          * Notes keep their editable node in the tree but never mark it input-focused, so
@@ -276,18 +279,47 @@ class FocusAccessibilityService : AccessibilityService() {
          * window recovers dictation for those apps. Only invoked after the focus tiers
          * fail, so it can't change behavior for apps that already resolve a focused node.
          */
-        private fun findTextInputInActiveWindow(svc: AccessibilityService): AccessibilityNodeInfo? {
-            val windows = svc.windows ?: return null
+        private fun findTextInputInApplicationWindows(svc: AccessibilityService): AccessibilityNodeInfo? {
+            val windows = svc.windows
+                ?.filter { it.type != AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+                ?.sortedByDescending { it.isActive }
+                ?: return null
             for (window in windows) {
-                if (!window.isActive) continue
-                if (window.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD) continue
                 val root = window.root ?: continue
-                val match = findTextInputDescendant(root)
+                // The pill is a non-focusable overlay, but some Samsung builds still
+                // report its window ahead of the editor. Never select our own tree.
+                if (root.packageName?.toString() == svc.packageName) {
+                    root.recycle()
+                    continue
+                }
+
+                // Prefer a node that explicitly advertises PASTE/SET_TEXT. Samsung
+                // Notes sometimes marks a rich-text container editable before its
+                // actionable composer child; returning the container makes insertion
+                // fail even though a usable child exists deeper in the same tree.
+                val match = findActionableTextInputDescendant(root)
+                    ?: findTextInputDescendant(root)
                 if (match != null) {
                     if (match !== root) root.recycle()
                     return match
                 }
                 root.recycle()
+            }
+            return null
+        }
+
+        private fun findActionableTextInputDescendant(
+            node: AccessibilityNodeInfo,
+        ): AccessibilityNodeInfo? {
+            if (hasTextMutationAction(node)) return node
+            for (i in 0 until node.childCount) {
+                val child = node.getChild(i) ?: continue
+                val match = findActionableTextInputDescendant(child)
+                if (match != null) {
+                    if (match !== child) child.recycle()
+                    return match
+                }
+                child.recycle()
             }
             return null
         }

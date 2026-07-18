@@ -16,6 +16,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.widget.doAfterTextChanged
+import dev.prashikshit.voicey.data.LanguageCatalog
 import dev.prashikshit.voicey.data.LearnedCorrections
 import dev.prashikshit.voicey.data.Settings
 import dev.prashikshit.voicey.databinding.ActivitySettingsBinding
@@ -51,16 +53,18 @@ class SettingsActivity : AppCompatActivity() {
 
         bindFields(Settings.load(this))
         wireModelDropdowns()
+        wireModelStatus()
         wirePermissionButtons()
         wireBubbleToggle()
         wireResetButton()
-        wireClearCorrectionsButton()
+        wireDictionaryButton()
     }
 
     override fun onResume() {
         super.onResume()
         refreshPermissionStates()
         refreshBubbleButton()
+        refreshDictionarySummary()
     }
 
     override fun onPause() {
@@ -75,8 +79,7 @@ class SettingsActivity : AppCompatActivity() {
         // doesn't pop the suggestion list open underneath it.
         inputTranscriptionModel.setText(settings.transcriptionModel, false)
         inputCleanupModel.setText(settings.cleanupModel, false)
-        inputLanguage.setText(settings.language)
-        inputVocabulary.setText(settings.vocabulary.joinToString("\n"))
+        inputLanguage.setText(LanguageCatalog.labelForCode(settings.language), false)
         inputPrompt.setText(settings.systemPrompt)
         switchHoldToTalk.isChecked = settings.holdToTalk
         switchShowOnlyWhileTyping.isChecked = settings.showOnlyWhileTyping
@@ -96,21 +99,37 @@ class SettingsActivity : AppCompatActivity() {
         binding.inputCleanupModel.setAdapter(
             NoFilterArrayAdapter(this, Settings.CLEANUP_MODEL_SUGGESTIONS)
         )
+        binding.inputLanguage.setAdapter(
+            NoFilterArrayAdapter(this, LanguageCatalog.labels)
+        )
+    }
+
+    private fun wireModelStatus() {
+        binding.inputCleanupModel.doAfterTextChanged { refreshModelStatus() }
+        refreshModelStatus()
+    }
+
+    private fun refreshModelStatus() {
+        val model = binding.inputCleanupModel.text?.toString()?.trim().orEmpty()
+        binding.layoutCleanupModel.helperText = Settings.DEPRECATED_GROQ_CLEANUP_MODELS[model]
     }
 
     private fun save() {
+        // Custom vocabulary is managed on its dedicated screen. Reload it here so
+        // leaving Settings can never overwrite dictionary edits with a stale copy.
+        val vocabulary = Settings.load(this).vocabulary
         val current = Settings(
             apiBase = binding.inputApiBase.text?.toString().orEmpty(),
             apiKey = binding.inputApiKey.text?.toString().orEmpty(),
             transcriptionModel = binding.inputTranscriptionModel.text?.toString().orEmpty(),
             cleanupModel = binding.inputCleanupModel.text?.toString().orEmpty(),
-            vocabulary = binding.inputVocabulary.text?.toString().orEmpty()
-                .lineSequence().map(String::trim).filter(String::isNotEmpty).toList(),
+            vocabulary = vocabulary,
             systemPrompt = binding.inputPrompt.text?.toString().orEmpty()
                 .ifBlank { Settings.DEFAULT_SYSTEM_PROMPT },
             holdToTalk = binding.switchHoldToTalk.isChecked,
-            language = binding.inputLanguage.text?.toString().orEmpty()
-                .ifBlank { Settings.DEFAULT_LANGUAGE },
+            language = LanguageCatalog.codeForLabel(
+                binding.inputLanguage.text?.toString().orEmpty()
+            ),
             showOnlyWhileTyping = binding.switchShowOnlyWhileTyping.isChecked,
             soundFeedback = binding.switchSoundFeedback.isChecked,
             learnCorrections = binding.switchLearnCorrections.isChecked,
@@ -118,17 +137,21 @@ class SettingsActivity : AppCompatActivity() {
         Settings.save(this, current)
     }
 
-    /**
-     * The escape hatch for the correction learner: a wrongly learned pair would bias
-     * every future dictation, so wiping the learned store must always be one tap away.
-     */
-    private fun wireClearCorrectionsButton() {
-        binding.btnClearCorrections.setOnClickListener {
-            val store = LearnedCorrections(this)
-            val count = store.count()
-            store.clear()
-            toast(getString(R.string.corrections_cleared, count))
+    private fun wireDictionaryButton() {
+        binding.btnOpenDictionary.setOnClickListener {
+            save()
+            startActivity(Intent(this, DictionaryActivity::class.java))
         }
+    }
+
+    private fun refreshDictionarySummary() {
+        val customCount = Settings.load(this).vocabulary.size
+        val learnedCount = LearnedCorrections(this).count()
+        binding.textDictionarySummary.text = getString(
+            R.string.dictionary_summary,
+            customCount,
+            learnedCount,
+        )
     }
 
     private fun wirePermissionButtons() = with(binding) {
@@ -218,6 +241,7 @@ class SettingsActivity : AppCompatActivity() {
         )
         Settings.save(this, restored)
         bindFields(restored)
+        refreshModelStatus()
         toast(getString(R.string.reset_complete))
     }
 

@@ -33,6 +33,12 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".DictionaryActivity"
+            android:exported="false"
+            android:label="@string/dictionary_title"
+            android:parentActivityName=".SettingsActivity" />
+
         <service
             android:name=".service.FloatingBubbleService"
             android:exported="false"

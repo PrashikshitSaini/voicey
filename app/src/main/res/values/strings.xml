@@ -6,6 +6,11 @@
 
     <string name="settings_title">Voicey</string>
     <string name="settings_blurb">Free, open-source AI dictation. Bring your own API key.</string>
+    <string name="settings_hero_badge">PRIVATE · YOUR API · NO SUBSCRIPTION</string>
+    <string name="section_permissions">Get started</string>
+    <string name="section_ai">AI provider</string>
+    <string name="section_language_dictionary">Language &amp; dictionary</string>
+    <string name="section_experience">Experience</string>
 
     <string name="api_provider_label">API endpoint</string>
     <string name="api_provider_hint">https://api.groq.com/openai/v1</string>
@@ -17,10 +22,11 @@
     <string name="transcription_model_hint">whisper-large-v3-turbo</string>
 
     <string name="cleanup_model_label">Cleanup model</string>
-    <string name="cleanup_model_hint">llama-3.3-70b-versatile</string>
+    <string name="cleanup_model_hint">openai/gpt-oss-20b</string>
 
-    <string name="language_label">Language (ISO code: en, hi, es, …)</string>
-    <string name="language_hint">en</string>
+    <string name="language_label">Dictation language</string>
+    <string name="language_hint">Auto-detect (multilingual)</string>
+    <string name="language_helper">Auto-detect supports multilingual speech. Pin a common language—or enter any ISO code—for the best speed and accuracy.</string>
 
     <string name="vocabulary_label">Custom vocabulary (one per line)</string>
     <string name="prompt_label">System prompt</string>
@@ -31,6 +37,32 @@
     <string name="learn_corrections_label">Learn from my spelling fixes</string>
     <string name="clear_corrections_button">Clear learned corrections</string>
     <string name="corrections_cleared">Cleared %1$d learned corrections</string>
+    <string name="open_dictionary">Open my dictionary</string>
+    <string name="dictionary_summary">%1$d custom terms · %2$d learned corrections</string>
+
+    <string name="dictionary_title">My dictionary</string>
+    <string name="dictionary_subtitle">Words Voicey should get right</string>
+    <string name="dictionary_intro">Voicey uses custom terms while listening and learned corrections while polishing. They are stored encrypted on this device and sent only to your chosen provider during dictation.</string>
+    <string name="dictionary_summary_placeholder">Open to manage your words and corrections</string>
+    <string name="dictionary_custom_title">Custom dictionary</string>
+    <string name="dictionary_custom_description">Add names, people, products, and jargon exactly as you want them spelled.</string>
+    <string name="dictionary_term_hint">Add a word or phrase</string>
+    <string name="dictionary_add">Add</string>
+    <string name="dictionary_custom_empty">No custom terms yet. Add the names Voicey should always recognize.</string>
+    <string name="dictionary_learned_title">Learned corrections</string>
+    <string name="dictionary_learned_description">Voicey learns when you fix its spelling. You can also teach a correction manually.</string>
+    <string name="dictionary_wrong_hint">Voicey hears / writes</string>
+    <string name="dictionary_right_hint">I want it written as</string>
+    <string name="dictionary_add_correction">Teach this correction</string>
+    <string name="dictionary_learned_empty">Nothing learned yet. Corrections you make after dictation will appear here.</string>
+    <string name="dictionary_clear_all">Clear all learned corrections</string>
+    <string name="dictionary_clear_title">Clear learned corrections?</string>
+    <string name="dictionary_clear_message">This removes all %1$d learned corrections. Your custom dictionary is kept.</string>
+    <string name="dictionary_clear_confirm">Clear all</string>
+    <string name="dictionary_term_exists">That term is already in your dictionary</string>
+    <string name="dictionary_correction_needs_both">Enter both spellings first</string>
+    <string name="dictionary_correction_same">The two spellings are already the same</string>
+    <string name="dictionary_correction_added">Learned: %1$s</string>
 
     <string name="pill_tap_to_speak">Tap to speak</string>
     <string name="pill_processing">Polishing…</string>

@@ -148,7 +148,7 @@ object CorrectionLearner {
         if (oldTokens.isEmpty() || newTokens.isEmpty()) return emptyList()
 
         val corrections = mutableListOf<Correction>()
-        for ((oldHunk, newHunk) in replacementHunks(oldTokens, newTokens)) {
+        for ((oldHunk, newHunk) in CorrectionDiff.replacementHunks(oldTokens, newTokens)) {
             if (corrections.size >= MAX_LEARNED_PER_SESSION) break
             val candidate = toCorrection(oldHunk, newHunk, insertedTokens) ?: continue
             corrections += candidate
@@ -182,51 +182,6 @@ object CorrectionLearner {
         if (distance > maxAllowed) return null
 
         return Correction(wrong, right)
-    }
-
-    /**
-     * Standard LCS dynamic program over tokens, then a single walk extracting hunks
-     * where both sides changed (replacements). Case-sensitive equality so that pure
-     * capitalization fixes ("wispr flow" → "Wispr Flow") surface as learnable hunks.
-     */
-    private fun replacementHunks(
-        oldTokens: List<String>,
-        newTokens: List<String>,
-    ): List<Pair<List<String>, List<String>>> {
-        val n = oldTokens.size
-        val m = newTokens.size
-        val lcs = Array(n + 1) { IntArray(m + 1) }
-        for (i in n - 1 downTo 0) {
-            for (j in m - 1 downTo 0) {
-                lcs[i][j] = if (oldTokens[i] == newTokens[j]) {
-                    lcs[i + 1][j + 1] + 1
-                } else {
-                    max(lcs[i + 1][j], lcs[i][j + 1])
-                }
-            }
-        }
-
-        val hunks = mutableListOf<Pair<List<String>, List<String>>>()
-        var i = 0
-        var j = 0
-        while (i < n && j < m) {
-            if (oldTokens[i] == newTokens[j]) {
-                i++
-                j++
-                continue
-            }
-            val hunkOldStart = i
-            val hunkNewStart = j
-            while (i < n && j < m && oldTokens[i] != newTokens[j]) {
-                if (lcs[i + 1][j] >= lcs[i][j + 1]) i++ else j++
-            }
-            val oldHunk = oldTokens.subList(hunkOldStart, i)
-            val newHunk = newTokens.subList(hunkNewStart, j)
-            if (oldHunk.isNotEmpty() && newHunk.isNotEmpty()) {
-                hunks += oldHunk to newHunk
-            }
-        }
-        return hunks
     }
 
     /** Splits on whitespace and trims punctuation from token edges. */

@@ -47,6 +47,11 @@ class LearnedCorrections(context: Context) {
         store.putString(KEY_CORRECTIONS, "[]")
     }
 
+    /** Removes one learned or manually added correction by its wrong-side spelling. */
+    fun delete(wrong: String) {
+        save(all().filterNot { it.wrong.equals(wrong, ignoreCase = true) })
+    }
+
     fun count(): Int = all().size
 
     private fun save(corrections: List<Correction>) {

@@ -61,7 +61,11 @@ class WhisperClient(private val settings: Settings) {
             .addFormDataPart("model", settings.transcriptionModel)
             .addFormDataPart("response_format", "verbose_json")
             .addFormDataPart("temperature", "0")
-            .addFormDataPart("language", settings.language.ifBlank { "en" })
+        // Groq/Whisper auto-detects when language is omitted. Pinning a language still
+        // improves latency and accuracy for users who consistently dictate in one.
+        if (settings.language.isNotBlank()) {
+            multipartBuilder.addFormDataPart("language", settings.language)
+        }
         if (vocabPrompt.isNotEmpty()) {
             multipartBuilder.addFormDataPart("prompt", vocabPrompt)
         }

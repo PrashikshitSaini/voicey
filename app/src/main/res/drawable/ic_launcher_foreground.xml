@@ -3,7 +3,15 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+    <!-- A floating dictation pill with a live voice waveform: Voicey's core experience. -->
     <path
-        android:fillColor="#F9FAFB"
-        android:pathData="M54,40c4,0 7,-3 7,-7V19c0,-4 -3,-7 -7,-7s-7,3 -7,7v14C47,37 50,40 54,40zM67,33c0,7 -6,13 -13,13s-13,-6 -13,-13h-5c0,9 7,16 15,17v9h6v-9c8,-1 15,-8 15,-17H67z"/>
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M32,32H76A10,10 0,0 1,86 42V66A10,10 0,0 1,76 76H32A10,10 0,0 1,22 66V42A10,10 0,0 1,32 32Z" />
+    <path
+        android:fillColor="#FF6B6B"
+        android:pathData="M35,49A3,3 0,0 1,38 52V56A3,3 0,0 1,32 56V52A3,3 0,0 1,35 49Z
+            M45,42A3,3 0,0 1,48 45V63A3,3 0,0 1,42 63V45A3,3 0,0 1,45 42Z
+            M54,37A3,3 0,0 1,57 40V68A3,3 0,0 1,51 68V40A3,3 0,0 1,54 37Z
+            M63,43A3,3 0,0 1,66 46V62A3,3 0,0 1,60 62V46A3,3 0,0 1,63 43Z
+            M73,49A3,3 0,0 1,76 52V56A3,3 0,0 1,70 56V52A3,3 0,0 1,73 49Z" />
 </vector>

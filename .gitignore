@@ -4,9 +4,13 @@ local.properties
 .idea/
 *.iml
 .DS_Store
+# AppleDouble metadata created when macOS writes to non-APFS external drives.
+# A basename-only pattern applies at every depth in the repository.
+._*
 captures/
 .externalNativeBuild/
 .cxx/
 release/
 *.keystore
+!app/voicey-release.keystore
 *.jks

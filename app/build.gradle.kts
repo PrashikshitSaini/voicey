@@ -11,25 +11,33 @@ android {
         applicationId = "dev.prashikshit.voicey"
         minSdk = 26
         targetSdk = 34
-        versionCode = 8
-        versionName = "0.1.8"
+        versionCode = 9
+        versionName = "0.1.9"
         vectorDrawables.useSupportLibrary = true
+    }
+
+    // Public, stable signing identity for sideloaded builds. Using the same certificate
+    // in debug artifacts and releases lets Android install every future APK as an
+    // in-place update while preserving app data and granted permissions.
+    signingConfigs {
+        create("voicey") {
+            storeFile = file("voicey-release.keystore")
+            storePassword = "voicey-public-signing"
+            keyAlias = "voicey"
+            keyPassword = "voicey-public-signing"
+            storeType = "PKCS12"
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // Sign release builds with the debug keystore that Gradle auto-generates on
-            // the CI runner. This makes the APK installable without any keystore setup.
-            // Trade-off: each CI run generates a fresh debug certificate, so users will
-            // need to uninstall an older Voicey before installing a newer release.
-            // Switch to a proper release keystore when there are enough users to make
-            // smooth updates matter — see README → "Stable signing" for the upgrade path.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("voicey")
         }
         debug {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("voicey")
         }
     }
 
@@ -56,4 +64,5 @@ dependencies {
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    testImplementation("junit:junit:4.13.2")
 }

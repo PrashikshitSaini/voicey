@@ -16,8 +16,8 @@ data class Settings(
     val vocabulary: List<String>,
     val systemPrompt: String,
     val holdToTalk: Boolean,
-    /** ISO-639-1 language code (e.g. "en", "hi", "es"). Pinned on Whisper requests to
-     *  suppress language-detection hallucinations on short clips. */
+    /** ISO-639-1 language code (e.g. "en", "hi", "es"), or blank for multilingual
+     *  auto-detection. Pinning suppresses language-detection errors on short clips. */
     val language: String,
     /** Show the pill only while a keyboard is open (requires the accessibility service). */
     val showOnlyWhileTyping: Boolean,
@@ -31,7 +31,8 @@ data class Settings(
     companion object {
         const val DEFAULT_API_BASE = "https://api.groq.com/openai/v1"
         const val DEFAULT_TRANSCRIPTION_MODEL = "whisper-large-v3-turbo"
-        const val DEFAULT_CLEANUP_MODEL = "llama-3.3-70b-versatile"
+        const val DEFAULT_CLEANUP_MODEL = "openai/gpt-oss-20b"
+        /** Empty means provider-side language detection (multilingual mode). */
         const val DEFAULT_LANGUAGE = "en"
 
         /**
@@ -45,11 +46,19 @@ data class Settings(
             "whisper-large-v3",
         )
         val CLEANUP_MODEL_SUGGESTIONS = listOf(
-            "llama-3.1-8b-instant",
-            "llama-3.3-70b-versatile",
-            "meta-llama/llama-4-scout-17b-16e-instruct",
             "openai/gpt-oss-20b",
             "openai/gpt-oss-120b",
+        )
+
+        /**
+         * Groq free/developer-tier shutdowns published in June 2026. We preserve a
+         * user's saved choice rather than silently changing their dictation output,
+         * but SettingsActivity uses this map to show a migration warning.
+         */
+        val DEPRECATED_GROQ_CLEANUP_MODELS = mapOf(
+            "llama-3.1-8b-instant" to "Groq shutdown Aug 16, 2026 · switch to openai/gpt-oss-20b",
+            "llama-3.3-70b-versatile" to "Groq shutdown Aug 16, 2026 · switch to openai/gpt-oss-120b",
+            "meta-llama/llama-4-scout-17b-16e-instruct" to "Deprecated by Groq · switch to openai/gpt-oss-120b",
         )
 
         /**
@@ -61,6 +70,7 @@ data class Settings(
 Your job:
 - Remove filler words (um, uh, you know, like) unless they carry meaning.
 - Fix spelling, grammar, and punctuation errors.
+- Preserve the language or languages the speaker used. Never translate unless explicitly asked.
 - When the transcript contains a word that is a close misspelling of a name or term from the context or custom vocabulary, correct the spelling. Never insert names or terms from context that the speaker did not say.
 - Preserve the speaker's intent, tone, and meaning exactly.
 - Strip Whisper hallucinations. If the transcript begins or ends with stock YouTube-style phrases that the user did not say — for example "Subscribe", "Thanks for watching", "Like and subscribe", "Search history", "History of", or similar AI-generated boilerplate — remove them entirely.
@@ -101,7 +111,9 @@ Output rules:
             store.putString(KEY_VOCABULARY, settings.vocabulary.joinToString("\n"))
             store.putString(KEY_SYSTEM_PROMPT, settings.systemPrompt)
             store.putBoolean(KEY_HOLD_TO_TALK, settings.holdToTalk)
-            store.putString(KEY_LANGUAGE, settings.language.trim().ifBlank { DEFAULT_LANGUAGE })
+            // Blank is intentional: omitting Whisper's language parameter enables
+            // multilingual auto-detection. A pinned ISO code is stored verbatim.
+            store.putString(KEY_LANGUAGE, settings.language.trim())
             store.putBoolean(KEY_SHOW_ONLY_WHILE_TYPING, settings.showOnlyWhileTyping)
             store.putBoolean(KEY_SOUND_FEEDBACK, settings.soundFeedback)
             store.putBoolean(KEY_LEARN_CORRECTIONS, settings.learnCorrections)

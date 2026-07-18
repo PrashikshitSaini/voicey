@@ -25,8 +25,8 @@ Don't see a release link yet? Either:
 mic button held / tapped
   → record 16 kHz mono PCM audio
   → POST to your provider's /audio/transcriptions (Groq, OpenAI, Ollama, etc.)
-  → POST raw transcript + focused-field context + your custom vocab to /chat/completions
-  → clipboard + ACTION_PASTE into the focused text field
+  → POST raw transcript + focused-field context + your dictionary to /chat/completions
+  → direct write for empty fields, transient paste when appending
 ```
 
 No keyboard switch. Works alongside Gboard, SwiftKey, whatever you already use.
@@ -69,7 +69,7 @@ Voicey works with any OpenAI-compatible API. Tested:
 
 | Provider | API base | Transcription model | Cleanup model |
 |---|---|---|---|
-| **Groq Cloud** (recommended, free tier) | `https://api.groq.com/openai/v1` | `whisper-large-v3-turbo` | `llama-3.3-70b-versatile` |
+| **Groq Cloud** (recommended, free tier) | `https://api.groq.com/openai/v1` | `whisper-large-v3-turbo` | `openai/gpt-oss-20b` |
 | **OpenAI** | `https://api.openai.com/v1` | `whisper-1` | `gpt-4o-mini` |
 | **Ollama (local)** | `http://<your-ip>:11434/v1` | not supported — Ollama has no Whisper endpoint | `llama3.2` |
 
@@ -79,8 +79,11 @@ To use Ollama for cleanup only, point Groq at transcription and Ollama at cleanu
 
 In settings:
 
-- **Custom vocabulary** — list of names, jargon, project terms. The cleanup model is told to preserve the spelling if you say them.
+- **My dictionary** — add names, jargon, and project terms; inspect or remove every correction Voicey has learned; or teach a `wrong → right` correction manually.
+- **Language** — choose multilingual auto-detection or pin a supported language for better accuracy and latency on short dictations. Groq's current Whisper models support 99+ languages.
 - **System prompt** — overrides the default cleanup behavior. The default (lifted with light edits from FreeFlow) is conservative: removes fillers, fixes spelling, preserves intent. Replace it if you want a different style.
+
+Groq model suggestions are kept intentionally conservative. As of July 2026 the supported speech models are `whisper-large-v3-turbo` (fastest/best value) and `whisper-large-v3` (highest accuracy). The app recommends `openai/gpt-oss-20b` or `openai/gpt-oss-120b` for cleanup and warns when a saved Groq model has a published shutdown.
 
 ## Privacy
 
@@ -93,21 +96,13 @@ In settings:
 
 ## Releasing (maintainer only)
 
-Voicey uses a **shared-signing-key** model. The release keystore is committed to the repo at `app/voicey-release.keystore` and is treated as public infrastructure — same pattern F-Droid and many open-source Android projects use. There is no secret to manage; trust comes from the GitHub Releases URL, not from the signing certificate being private.
+Voicey uses a deliberately **shared-signing-key** model. The release keystore is committed at `app/voicey-release.keystore`, so GitHub Actions can produce the same signing identity on every run without maintainer secrets or a local Android setup.
 
-Practical consequence: anyone who clones the repo can build an APK signed with the same certificate. For sideloaded open-source distribution this is fine. For Play Store distribution you'd want a private keystore instead.
+Practical consequence: anyone who clones the repo can build an APK signed with this certificate. Install APKs only from this repository's Actions or Releases pages. This convenience tradeoff is intended for Voicey's current direct, sideloaded distribution; a Play Store or security-sensitive distribution should move to a private keystore before its first public build.
 
-### One-time: generate the shared keystore (in CI, not on your laptop)
+Certificate SHA-256: `54:27:65:5E:E3:6A:BC:BC:10:93:FB:56:D4:25:61:72:01:51:1B:6B:E7:83:E5:D0:E4:E6:84:76:CF:F1:45:17`
 
-You need **zero local tooling** — no JDK, no Docker, nothing.
-
-1. Open the repo's Actions tab: https://github.com/PrashikshitSaini/voicey/actions
-2. Pick the **Generate signing keystore** workflow on the left.
-3. Click **Run workflow** → **Run workflow**.
-4. Wait ~30 seconds. The workflow generates the keystore and commits it to `main` as `app/voicey-release.keystore`.
-5. `git pull` to bring the keystore into your local clone (optional — you don't actually need it locally).
-
-This is a one-time step for the lifetime of the project. Don't re-run it unless you're willing to ask every existing user to uninstall before updating.
+Both debug artifacts and release APKs use this certificate. Once a stable-signed Voicey build is installed, later GitHub Actions APKs update it in place and retain settings and Android permissions. Builds older than v0.1.9 used temporary CI certificates, so moving from one of those builds requires one final uninstall/reinstall.
 
 ### Cutting a release
 
