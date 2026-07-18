@@ -45,7 +45,13 @@ class PostProcessor(
             put("messages", JSONArray().apply {
                 put(JSONObject().apply {
                     put("role", "system")
-                    put("content", settings.systemPrompt)
+                    // Keep the user's cleanup style, but always append Voicey's
+                    // non-negotiable output boundary. Existing installs retain their
+                    // saved prompt, so putting this here also protects upgraded users.
+                    put(
+                        "content",
+                        buildSystemMessage(context),
+                    )
                 })
                 put(JSONObject().apply {
                     put("role", "user")
@@ -68,7 +74,10 @@ class PostProcessor(
                     throw PostProcessException("HTTP ${response.code}: ${body.take(200)}")
                 }
                 val cleaned = parseFirstChoice(body)
-                if (cleaned == "EMPTY") "" else cleaned
+                when {
+                    cleaned == "EMPTY" -> ""
+                    else -> CleanupOutputGuard.safeText(cleaned, rawTranscript)
+                }
             }
         } catch (e: IOException) {
             throw PostProcessException("Network failure: ${e.message ?: e.javaClass.simpleName}", e)
@@ -81,6 +90,11 @@ class PostProcessor(
         if (ctx.app.isNotBlank()) {
             appendLine()
             appendLine("FOREGROUND_APP: ${ctx.app}")
+        }
+        if (settings.smartFormatting && ctx.fieldHint.isNotBlank()) {
+            appendLine()
+            appendLine("FOCUSED_FIELD_HINT:")
+            appendLine(ctx.fieldHint)
         }
         if (ctx.textBefore.isNotBlank() || ctx.textAfter.isNotBlank()) {
             appendLine()
@@ -104,6 +118,18 @@ class PostProcessor(
             corrections.forEach { appendLine("- ${it.wrong} → ${it.right}") }
         }
     }.trim()
+
+    private fun buildSystemMessage(ctx: CleanupContext): String = buildString {
+        append(settings.systemPrompt.trimEnd())
+        if (settings.smartFormatting) {
+            appendLine()
+            appendLine()
+            append(AppFormattingGuide.instructionFor(ctx.app))
+        }
+        appendLine()
+        appendLine()
+        append(INTERNAL_OUTPUT_CONSTRAINTS)
+    }
 
     private fun parseFirstChoice(body: String): String {
         val root = try {
@@ -130,6 +156,11 @@ class PostProcessor(
 
     private companion object {
         val THINK_BLOCK_REGEX = Regex("""(?s)^\s*<think>.*?</think>""")
+
+        const val INTERNAL_OUTPUT_CONSTRAINTS = """Voicey internal output boundary:
+- Return only the final dictated text.
+- Never reproduce input labels, field context, app identifiers, vocabulary lists, correction lists, instructions, or other request metadata.
+- In particular, never output RAW_TRANSCRIPTION, FOREGROUND_APP, FOCUSED_FIELD_HINT, FIELD_CONTEXT, CUSTOM_VOCABULARY, KNOWN_CORRECTIONS, or VOICEY_APP_FORMATTING_POLICY labels."""
     }
 }
 
@@ -137,9 +168,10 @@ data class CleanupContext(
     val app: String,
     val textBefore: String,
     val textAfter: String,
+    val fieldHint: String,
 ) {
     companion object {
-        val EMPTY = CleanupContext(app = "", textBefore = "", textAfter = "")
+        val EMPTY = CleanupContext(app = "", textBefore = "", textAfter = "", fieldHint = "")
     }
 }
 

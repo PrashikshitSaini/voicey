@@ -25,6 +25,10 @@ data class Settings(
     val soundFeedback: Boolean,
     /** Learn spelling fixes the user makes right after a dictation lands. */
     val learnCorrections: Boolean,
+    /** Refuse clipboard-backed paste, even when an editor rejects direct accessibility writes. */
+    val neverUseClipboard: Boolean,
+    /** Let cleanup adapt structure to email, messaging, notes, and document apps. */
+    val smartFormatting: Boolean,
 ) {
     fun isReady(): Boolean = apiKey.isNotBlank() && apiBase.isNotBlank()
 
@@ -99,6 +103,8 @@ Output rules:
                 showOnlyWhileTyping = store.getBoolean(KEY_SHOW_ONLY_WHILE_TYPING, true),
                 soundFeedback = store.getBoolean(KEY_SOUND_FEEDBACK, true),
                 learnCorrections = store.getBoolean(KEY_LEARN_CORRECTIONS, true),
+                neverUseClipboard = store.getBoolean(KEY_NEVER_USE_CLIPBOARD, false),
+                smartFormatting = store.getBoolean(KEY_SMART_FORMATTING, true),
             )
         }
 
@@ -117,6 +123,8 @@ Output rules:
             store.putBoolean(KEY_SHOW_ONLY_WHILE_TYPING, settings.showOnlyWhileTyping)
             store.putBoolean(KEY_SOUND_FEEDBACK, settings.soundFeedback)
             store.putBoolean(KEY_LEARN_CORRECTIONS, settings.learnCorrections)
+            store.putBoolean(KEY_NEVER_USE_CLIPBOARD, settings.neverUseClipboard)
+            store.putBoolean(KEY_SMART_FORMATTING, settings.smartFormatting)
         }
 
         private const val KEY_API_BASE = "api_base"
@@ -130,5 +138,7 @@ Output rules:
         private const val KEY_SHOW_ONLY_WHILE_TYPING = "show_only_while_typing"
         private const val KEY_SOUND_FEEDBACK = "sound_feedback"
         private const val KEY_LEARN_CORRECTIONS = "learn_corrections"
+        private const val KEY_NEVER_USE_CLIPBOARD = "never_use_clipboard"
+        private const val KEY_SMART_FORMATTING = "smart_formatting"
     }
 }

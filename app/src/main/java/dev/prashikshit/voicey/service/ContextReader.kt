@@ -25,6 +25,7 @@ object ContextReader {
                 app = packageName.orEmpty(),
                 textBefore = "",
                 textAfter = "",
+                fieldHint = fieldHint(node),
             )
         }
         val selectionStart = node.textSelectionStart.takeIf { it >= 0 } ?: text.length
@@ -35,7 +36,14 @@ object ContextReader {
             app = packageName.orEmpty(),
             textBefore = before,
             textAfter = after,
+            fieldHint = fieldHint(node),
         )
+    }
+
+    private fun fieldHint(node: AccessibilityNodeInfo): String {
+        val value = node.hintText?.toString().orEmpty()
+            .ifBlank { node.contentDescription?.toString().orEmpty() }
+        return value.replace(WHITESPACE, " ").trim().take(MAX_FIELD_HINT_CHARS)
     }
 
     private fun userEnteredText(node: AccessibilityNodeInfo): String {
@@ -46,4 +54,7 @@ object ContextReader {
         if (hint.isNotEmpty() && hint == text) return ""
         return text
     }
+
+    private val WHITESPACE = Regex("\\s+")
+    private const val MAX_FIELD_HINT_CHARS = 160
 }

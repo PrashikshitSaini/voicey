@@ -284,6 +284,38 @@
             android:layout_marginTop="8dp"
             android:text="@string/learn_corrections_label" />
 
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/switch_smart_formatting"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/smart_formatting_label" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:layout_marginTop="2dp"
+            android:layout_marginEnd="4dp"
+            android:text="@string/smart_formatting_helper"
+            android:textAppearance="?attr/textAppearanceBodySmall" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/switch_never_use_clipboard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/never_use_clipboard_label" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:layout_marginTop="2dp"
+            android:layout_marginEnd="4dp"
+            android:text="@string/never_use_clipboard_helper"
+            android:textAppearance="?attr/textAppearanceBodySmall" />
+
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_toggle_bubble"
             android:layout_width="match_parent"

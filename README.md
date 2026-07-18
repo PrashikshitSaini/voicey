@@ -88,11 +88,14 @@ Groq model suggestions are kept intentionally conservative. As of July 2026 the 
 ## Privacy
 
 - Audio leaves your device only to the API endpoint you configure (e.g., Groq).
-- The cleanup request sends the raw transcript, the focused field's surrounding text, the foreground app's package name, your custom vocabulary, and your learned corrections to the same endpoint.
+- The cleanup request sends the raw transcript, the focused field's surrounding text and hint, the foreground app's package name, your custom vocabulary, and your learned corrections to the same endpoint.
 - Nothing is sent to anyone else. No telemetry. No analytics. No server owned by this project — there is no server.
 - API keys are stored in `EncryptedSharedPreferences` (Android Keystore-backed AES-256).
 - Most dictations never touch the clipboard at all: empty fields are written directly. Appending to a field that already has content uses a transient clip that is cleared (or your previous clip restored) about half a second later and flagged sensitive. Caveat: OEM keyboard clipboard panels (Samsung, Gboard) may still capture that brief transit for non-empty-field dictations.
 - **Learning from your fixes** ("Learn from my spelling fixes", on by default): if you correct a word right after a dictation lands — say Voicey wrote `VHISPERFLOW` and you fix it to `Wispr Flow` — the pair is learned and applied to future dictations. Learning watches only the field Voicey just dictated into, for at most 45 seconds, never password fields. Pairs are stored on-device in the same encrypted prefs and are erasable anytime via "Clear learned corrections".
+- **Never use the clipboard** (optional): strict mode reconstructs accessible field text around the cursor and writes it directly. Editors that hide their text or reject accessibility writes fail visibly instead of falling back to a temporary clipboard paste. Leave it off for maximum WebView/rich-editor compatibility.
+- **Smart app-aware formatting** (on by default): Voicey maps common email, messaging, notes, and document apps to conservative formatting profiles. It uses paragraphs for longer prose, bullets for genuine groups of points, and numbered lists for ordered steps—without forcing every dictation into a list. Focused-field hints keep subject, recipient, and search fields concise.
+- Cleanup responses are checked before insertion. If a model echoes Voicey's internal context labels, vocabulary, corrections, or request metadata, the response is discarded and the original Whisper transcript is inserted instead.
 
 ## Releasing (maintainer only)
 

@@ -105,14 +105,20 @@ class Pipeline(
                 // into". currentPackageName() is event-stream noise — the last event
                 // before insertion is usually from Voicey's own pill re-rendering or
                 // the keyboard, which broke correction learning and context labeling.
-                val targetPackage = focusedNode?.packageName?.toString()
+                val nodePackage = focusedNode?.packageName?.toString().orEmpty()
+                val targetPackage = nodePackage
+                    .takeIf { it.isNotBlank() && it != context.packageName }
                     ?: FocusAccessibilityService.currentPackageName()
                 val ctx = ContextReader.read(focusedNode, targetPackage)
 
                 val cleaned = postProcessor.clean(raw, ctx)
                 val toInsert = cleaned.ifBlank { raw }
 
-                val result = injector.insert(focusedNode, toInsert)
+                val result = injector.insert(
+                    node = focusedNode,
+                    text = toInsert,
+                    neverUseClipboard = settings.neverUseClipboard,
+                )
                 focusedNode?.recycle()
 
                 when (result) {
@@ -133,6 +139,9 @@ class Pipeline(
                         onMessage("Tap a text field first")
                     }
                     TextInjector.InsertionResult.FAILED -> fail("This app blocks accessibility writes")
+                    TextInjector.InsertionResult.CLIPBOARD_REQUIRED -> {
+                        fail("This editor needs clipboard fallback; disable strict clipboard-free mode")
+                    }
                     TextInjector.InsertionResult.SKIPPED_EMPTY -> updateState(State.IDLE)
                 }
             } catch (ce: CancellationException) {

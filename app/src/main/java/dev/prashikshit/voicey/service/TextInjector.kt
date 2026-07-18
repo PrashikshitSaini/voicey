@@ -14,13 +14,20 @@ import android.view.accessibility.AccessibilityNodeInfo
 /**
  * Writes the transcribed text into the currently focused field.
  *
- * Three-tier strategy:
+ * Clipboard-free mode is explicit rather than pretending every Android editor exposes
+ * an insert-at-cursor API. Empty native fields always use direct ACTION_SET_TEXT. When
+ * strict mode is enabled, non-empty accessible fields are reconstructed around their
+ * reported selection and written directly; opaque/custom editors fail without touching
+ * the clipboard. With strict mode disabled, ACTION_PASTE remains the compatibility path.
  *
  *   0. **Direct ACTION_SET_TEXT for confidently empty native fields** — no clipboard
  *      transit at all. Covers the most common dictation case; see [isConfidentlyEmpty]
  *      for why this can never destroy content or resurrect the placeholder bug.
  *
- *   1. **Clipboard + ACTION_PASTE** — the primary path. ACTION_PASTE is the platform's
+ *   1. **Cursor-aware ACTION_SET_TEXT in strict mode** — reconstructs accessible text
+ *      around the selection and writes it back without clipboard transit.
+ *
+ *   2. **Clipboard + ACTION_PASTE** — the compatibility path. ACTION_PASTE is the platform's
  *      native "insert at cursor" action: it preserves existing typed content, naturally
  *      appends dictation, and bypasses the placeholder-as-`node.text` bug that splice-
  *      based SET_TEXT injection kept hitting on Compose-based inputs (WhatsApp, search
@@ -30,15 +37,13 @@ import android.view.accessibility.AccessibilityNodeInfo
  *      when there was no previous clip, the clipboard is cleared instead so the
  *      dictation never lingers there.
  *
- *   2. **ACTION_SET_TEXT** — fallback only. Used when ACTION_PASTE is unsupported on
+ *   3. **ACTION_SET_TEXT** — fallback only. Used when ACTION_PASTE is unsupported on
  *      the focused node (rare; usually custom views that expose SET_TEXT but not PASTE).
  *      Replaces the field's content because there's no safe way to splice without
  *      re-introducing the placeholder bug.
  *
- * Trade-off vs. v0.1.4/v0.1.5: the clipboard is touched on every dictation now, not
- * only on WebView fallbacks. Clipboard-history tools (Gboard, etc.) will briefly see
- * dictated text. The win: append behavior works everywhere, and the placeholder-prepend
- * bug class is structurally eliminated rather than papered over with heuristics.
+ * Compatibility mode may therefore touch the clipboard for non-empty or opaque fields.
+ * Strict mode never does; its explicit tradeoff is that some editors cannot be written.
  */
 class TextInjector(context: Context) {
 
@@ -46,7 +51,11 @@ class TextInjector(context: Context) {
     private val clipboard = appContext.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    fun insert(node: AccessibilityNodeInfo?, text: String): InsertionResult {
+    fun insert(
+        node: AccessibilityNodeInfo?,
+        text: String,
+        neverUseClipboard: Boolean = false,
+    ): InsertionResult {
         if (text.isEmpty()) return InsertionResult.SKIPPED_EMPTY
         if (node == null) return InsertionResult.NO_FOCUSED_NODE
 
@@ -59,10 +68,21 @@ class TextInjector(context: Context) {
             return InsertionResult.WROTE
         }
 
-        // Tier 1: clipboard + paste. Appends at cursor, preserves existing text.
+        // Strict mode guarantees that this method never reads or writes the clipboard.
+        // If an editor hides its value/selection or rejects SET_TEXT, report that fact
+        // instead of weakening the user's privacy choice behind their back.
+        if (neverUseClipboard) {
+            return if (insertAtSelectionDirectly(node, text)) {
+                InsertionResult.WROTE
+            } else {
+                InsertionResult.CLIPBOARD_REQUIRED
+            }
+        }
+
+        // Compatibility mode: clipboard + paste appends at cursor and preserves text.
         if (pasteViaClipboard(node, text)) return InsertionResult.WROTE
 
-        // Tier 2: SET_TEXT fallback. Replaces content. Rare path — only triggered
+        // Tier 3: SET_TEXT fallback. Replaces content. Rare path — only triggered
         // when the focused node has no working paste handler.
         if (setTextDirectly(node, text)) return InsertionResult.WROTE
 
@@ -76,8 +96,8 @@ class TextInjector(context: Context) {
      * SET_TEXT would destroy, so those always take the append-safe paste path. For
      * native fields, empty/hint-showing text genuinely means empty (mirrors
      * ContextReader.userEnteredText). Compose placeholders that masquerade as content
-     * fail these checks and fall through to paste — the placeholder-prepend bug class
-     * stays structurally impossible because no tier ever concatenates node.text.
+     * fail these checks and fall through to paste in compatibility mode. Strict mode's
+     * cursor-aware tier separately rejects the common zero-cursor placeholder shape.
      */
     private fun isConfidentlyEmpty(node: AccessibilityNodeInfo): Boolean {
         if (!node.isEditable) return false
@@ -94,6 +114,46 @@ class TextInjector(context: Context) {
         }
         if (!node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, setArgs)) return false
         moveCaretToEnd(node, text.length)
+        return true
+    }
+
+    /**
+     * Reconstructs a native editor's full value around its reported selection. This is
+     * the only clipboard-free approximation of an IME-style insert-at-cursor operation
+     * exposed to an accessibility service.
+     *
+     * A collapsed selection at position zero in an allegedly non-empty field is
+     * deliberately rejected. Several Compose/custom inputs expose placeholder text as
+     * node.text with a zero cursor and no hint metadata; accepting it recreates the old
+     * "Type a messageHello" corruption bug. A real field with its cursor manually moved
+     * to the beginning therefore reports unsupported in strict mode—a safe tradeoff.
+     */
+    private fun insertAtSelectionDirectly(
+        node: AccessibilityNodeInfo,
+        insertion: String,
+    ): Boolean {
+        if (!node.isEditable || node.isShowingHintText) return false
+
+        val current = node.text?.toString() ?: return false
+        val hint = node.hintText?.toString().orEmpty()
+        if (hint.isNotEmpty() && hint == current) return false
+
+        val rawStart = node.textSelectionStart
+        val rawEnd = node.textSelectionEnd
+        if (rawStart !in 0..current.length || rawEnd !in 0..current.length) return false
+        if (current.isNotEmpty() && rawStart == 0 && rawEnd == 0) return false
+
+        val splice = TextSplice.atSelection(current, rawStart, rawEnd, insertion)
+            ?: return false
+
+        val setArgs = Bundle().apply {
+            putCharSequence(
+                AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
+                splice.text,
+            )
+        }
+        if (!node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, setArgs)) return false
+        moveCaretToEnd(node, splice.caret)
         return true
     }
 
@@ -178,6 +238,7 @@ class TextInjector(context: Context) {
         WROTE,
         NO_FOCUSED_NODE,
         SKIPPED_EMPTY,
+        CLIPBOARD_REQUIRED,
         FAILED,
     }
 

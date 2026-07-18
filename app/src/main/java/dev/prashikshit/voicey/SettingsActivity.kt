@@ -85,6 +85,8 @@ class SettingsActivity : AppCompatActivity() {
         switchShowOnlyWhileTyping.isChecked = settings.showOnlyWhileTyping
         switchSoundFeedback.isChecked = settings.soundFeedback
         switchLearnCorrections.isChecked = settings.learnCorrections
+        switchNeverUseClipboard.isChecked = settings.neverUseClipboard
+        switchSmartFormatting.isChecked = settings.smartFormatting
     }
 
     /**
@@ -133,6 +135,8 @@ class SettingsActivity : AppCompatActivity() {
             showOnlyWhileTyping = binding.switchShowOnlyWhileTyping.isChecked,
             soundFeedback = binding.switchSoundFeedback.isChecked,
             learnCorrections = binding.switchLearnCorrections.isChecked,
+            neverUseClipboard = binding.switchNeverUseClipboard.isChecked,
+            smartFormatting = binding.switchSmartFormatting.isChecked,
         )
         Settings.save(this, current)
     }

@@ -35,6 +35,10 @@
     <string name="show_only_while_typing_label">Show pill only while typing</string>
     <string name="sound_feedback_label">Sound on record start/stop</string>
     <string name="learn_corrections_label">Learn from my spelling fixes</string>
+    <string name="smart_formatting_label">Smart app-aware formatting</string>
+    <string name="smart_formatting_helper">Adapts longer dictation to the active app: polished email paragraphs, bullets or numbered steps for real lists, concise messages, and structured notes.</string>
+    <string name="never_use_clipboard_label">Never use the clipboard</string>
+    <string name="never_use_clipboard_helper">Strict privacy mode. Voicey writes directly when Android exposes the field; incompatible web and rich-text editors will show an error instead of using a temporary paste.</string>
     <string name="clear_corrections_button">Clear learned corrections</string>
     <string name="corrections_cleared">Cleared %1$d learned corrections</string>
     <string name="open_dictionary">Open my dictionary</string>

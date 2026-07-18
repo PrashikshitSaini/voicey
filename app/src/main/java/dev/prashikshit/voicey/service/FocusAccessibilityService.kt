@@ -43,7 +43,9 @@ class FocusAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
         val pkg = event.packageName?.toString()
-        if (!pkg.isNullOrEmpty()) lastPackageName = pkg
+        // Voicey's pill emits accessibility events while it animates. Those events
+        // must never replace the actual editor package used for cleanup/formatting.
+        if (!pkg.isNullOrEmpty() && pkg != packageName) lastPackageName = pkg
 
         when (event.eventType) {
             AccessibilityEvent.TYPE_WINDOWS_CHANGED -> refreshKeyboardState()
@@ -210,7 +212,20 @@ class FocusAccessibilityService : AccessibilityService() {
             return findTextInputInApplicationWindows(svc)
         }
 
-        fun currentPackageName(): String = lastPackageName
+        fun currentPackageName(): String {
+            val svc = instance ?: return lastPackageName
+            val windows = svc.windows
+                ?.filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
+                ?.sortedByDescending { it.isActive }
+                .orEmpty()
+            for (window in windows) {
+                val root = window.root ?: continue
+                val candidate = root.packageName?.toString().orEmpty()
+                root.recycle()
+                if (candidate.isNotBlank() && candidate != svc.packageName) return candidate
+            }
+            return lastPackageName
+        }
 
         private fun findFocusedInputInWindows(svc: AccessibilityService): AccessibilityNodeInfo? {
             val windows = svc.windows ?: return null
