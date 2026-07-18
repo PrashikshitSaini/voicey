@@ -76,7 +76,12 @@ class PostProcessor(
                 val cleaned = parseFirstChoice(body)
                 when {
                     cleaned == "EMPTY" -> ""
-                    else -> CleanupOutputGuard.safeText(cleaned, rawTranscript)
+                    else -> AppAwareOutputFormatter.format(
+                        text = CleanupOutputGuard.safeText(cleaned, rawTranscript),
+                        packageName = context.app,
+                        fieldHint = context.fieldHint,
+                        enabled = settings.smartFormatting,
+                    )
                 }
             }
         } catch (e: IOException) {
@@ -159,6 +164,7 @@ class PostProcessor(
 
         const val INTERNAL_OUTPUT_CONSTRAINTS = """Voicey internal output boundary:
 - Return only the final dictated text.
+- Resolve explicit spoken self-corrections by retaining the speaker's final choice and removing the superseded wording.
 - Never reproduce input labels, field context, app identifiers, vocabulary lists, correction lists, instructions, or other request metadata.
 - In particular, never output RAW_TRANSCRIPTION, FOREGROUND_APP, FOCUSED_FIELD_HINT, FIELD_CONTEXT, CUSTOM_VOCABULARY, KNOWN_CORRECTIONS, or VOICEY_APP_FORMATTING_POLICY labels."""
     }

@@ -36,7 +36,9 @@ class AppFormattingGuideTest {
 
         assertTrue(policy.contains("multiple unordered points"))
         assertTrue(policy.contains("explicit sequence"))
-        assertTrue(policy.contains("Keep short prose as prose"))
+        assertTrue(policy.contains("spoken greeting"))
+        assertTrue(policy.contains("blank line"))
+        assertTrue(policy.contains("never invent a greeting or closing"))
     }
 
     @Test

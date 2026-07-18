@@ -73,6 +73,7 @@ data class Settings(
 
 Your job:
 - Remove filler words (um, uh, you know, like) unless they carry meaning.
+- Resolve explicit spoken self-corrections by keeping the final choice. For example, "4:30—no, actually 5:30" should contain only 5:30 in the result.
 - Fix spelling, grammar, and punctuation errors.
 - Preserve the language or languages the speaker used. Never translate unless explicitly asked.
 - When the transcript contains a word that is a close misspelling of a name or term from the context or custom vocabulary, correct the spelling. Never insert names or terms from context that the speaker did not say.

@@ -14,20 +14,22 @@ import android.view.accessibility.AccessibilityNodeInfo
 /**
  * Writes the transcribed text into the currently focused field.
  *
- * Clipboard-free mode is explicit rather than pretending every Android editor exposes
- * an insert-at-cursor API. Empty native fields always use direct ACTION_SET_TEXT. When
- * strict mode is enabled, non-empty accessible fields are reconstructed around their
- * reported selection and written directly; opaque/custom editors fail without touching
- * the clipboard. With strict mode disabled, ACTION_PASTE remains the compatibility path.
+ * Android 13+ provides an accessibility InputConnection, so the first strategy is a
+ * true IME-style commit at the live cursor. It is clipboard-free and works with rich
+ * editors such as Gmail without reconstructing their entire accessibility value. Older
+ * Android versions fall through to direct ACTION_SET_TEXT or compatibility paste.
  *
- *   0. **Direct ACTION_SET_TEXT for confidently empty native fields** — no clipboard
+ *   0. **Accessibility InputConnection.commitText** — no clipboard, cursor-aware,
+ *      selection-aware, and independent of the editor's accessibility text model.
+ *
+ *   1. **Direct ACTION_SET_TEXT for confidently empty native fields** — no clipboard
  *      transit at all. Covers the most common dictation case; see [isConfidentlyEmpty]
  *      for why this can never destroy content or resurrect the placeholder bug.
  *
- *   1. **Cursor-aware ACTION_SET_TEXT in strict mode** — reconstructs accessible text
+ *   2. **Cursor-aware ACTION_SET_TEXT in strict mode** — reconstructs accessible text
  *      around the selection and writes it back without clipboard transit.
  *
- *   2. **Clipboard + ACTION_PASTE** — the compatibility path. ACTION_PASTE is the platform's
+ *   3. **Clipboard + ACTION_PASTE** — the compatibility path. ACTION_PASTE is the platform's
  *      native "insert at cursor" action: it preserves existing typed content, naturally
  *      appends dictation, and bypasses the placeholder-as-`node.text` bug that splice-
  *      based SET_TEXT injection kept hitting on Compose-based inputs (WhatsApp, search
@@ -37,7 +39,7 @@ import android.view.accessibility.AccessibilityNodeInfo
  *      when there was no previous clip, the clipboard is cleared instead so the
  *      dictation never lingers there.
  *
- *   3. **ACTION_SET_TEXT** — fallback only. Used when ACTION_PASTE is unsupported on
+ *   4. **ACTION_SET_TEXT** — fallback only. Used when ACTION_PASTE is unsupported on
  *      the focused node (rare; usually custom views that expose SET_TEXT but not PASTE).
  *      Replaces the field's content because there's no safe way to splice without
  *      re-introducing the placeholder bug.
@@ -57,14 +59,24 @@ class TextInjector(context: Context) {
         neverUseClipboard: Boolean = false,
     ): InsertionResult {
         if (text.isEmpty()) return InsertionResult.SKIPPED_EMPTY
+
+        // Best path on Android 13+: the accessibility service receives the same live
+        // InputConnection used by Gboard/Samsung Keyboard. This inserts at the cursor,
+        // replaces a selection, supports rich-text editors, and never touches ClipboardManager.
+        if (FocusAccessibilityService.commitTextAtCursor(text)) {
+            return InsertionResult.WROTE
+        }
+
         if (node == null) return InsertionResult.NO_FOCUSED_NODE
 
-        // Tier 0: confidently empty native field → direct SET_TEXT, NO clipboard.
+        // Tier 1: confidently empty native/rich field → direct SET_TEXT, NO clipboard.
         // This is the common dictation case (empty reply box) and keeps the text out
         // of Samsung/Gboard clipboard panels entirely, which snapshot every clip
         // change regardless of the sensitive flag. Paste's append semantics are only
         // needed when there is existing content to preserve — an empty field has none.
-        if (isConfidentlyEmpty(node) && setTextDirectly(node, text)) {
+        if (isConfidentlyEmpty(node, allowActionOnly = neverUseClipboard) &&
+            setTextDirectly(node, text)
+        ) {
             return InsertionResult.WROTE
         }
 
@@ -82,7 +94,7 @@ class TextInjector(context: Context) {
         // Compatibility mode: clipboard + paste appends at cursor and preserves text.
         if (pasteViaClipboard(node, text)) return InsertionResult.WROTE
 
-        // Tier 3: SET_TEXT fallback. Replaces content. Rare path — only triggered
+        // Tier 4: SET_TEXT fallback. Replaces content. Rare path — only triggered
         // when the focused node has no working paste handler.
         if (setTextDirectly(node, text)) return InsertionResult.WROTE
 
@@ -90,17 +102,15 @@ class TextInjector(context: Context) {
     }
 
     /**
-     * True only when we can TRUST that the field is empty. Gated on [AccessibilityNodeInfo.isEditable]
-     * because WebView virtual nodes typically leave it false AND often refuse to expose
-     * their text — an opaque web field that *looks* empty may hold real content that a
-     * SET_TEXT would destroy, so those always take the append-safe paste path. For
-     * native fields, empty/hint-showing text genuinely means empty (mirrors
-     * ContextReader.userEnteredText). Compose placeholders that masquerade as content
-     * fail these checks and fall through to paste in compatibility mode. Strict mode's
-     * cursor-aware tier separately rejects the common zero-cursor placeholder shape.
+     * True only when we can trust that a text-like node is empty. Gmail and other rich
+     * editors may report isEditable=false while explicitly advertising ACTION_SET_TEXT,
+     * so either signal is accepted. Opaque nodes with neither signal remain paste-only.
      */
-    private fun isConfidentlyEmpty(node: AccessibilityNodeInfo): Boolean {
-        if (!node.isEditable) return false
+    private fun isConfidentlyEmpty(
+        node: AccessibilityNodeInfo,
+        allowActionOnly: Boolean,
+    ): Boolean {
+        if (!node.isEditable && !(allowActionOnly && supportsSetText(node))) return false
         val text = node.text?.toString().orEmpty()
         if (text.isEmpty()) return true
         if (node.isShowingHintText) return true
@@ -132,15 +142,21 @@ class TextInjector(context: Context) {
         node: AccessibilityNodeInfo,
         insertion: String,
     ): Boolean {
-        if (!node.isEditable || node.isShowingHintText) return false
+        if ((!node.isEditable && !supportsSetText(node)) || node.isShowingHintText) return false
 
         val current = node.text?.toString() ?: return false
         val hint = node.hintText?.toString().orEmpty()
         if (hint.isNotEmpty() && hint == current) return false
 
-        val rawStart = node.textSelectionStart
-        val rawEnd = node.textSelectionEnd
-        if (rawStart !in 0..current.length || rawEnd !in 0..current.length) return false
+        val reportedStart = node.textSelectionStart
+        val reportedEnd = node.textSelectionEnd
+        // Some rich editors expose their full text and SET_TEXT action but omit
+        // selection coordinates. Appending at the end is the safest useful direct
+        // behavior in strict mode and is preferable to rejecting every dictation.
+        val hasValidSelection =
+            reportedStart in 0..current.length && reportedEnd in 0..current.length
+        val rawStart = if (hasValidSelection) reportedStart else current.length
+        val rawEnd = if (hasValidSelection) reportedEnd else current.length
         if (current.isNotEmpty() && rawStart == 0 && rawEnd == 0) return false
 
         val splice = TextSplice.atSelection(current, rawStart, rawEnd, insertion)
@@ -156,6 +172,9 @@ class TextInjector(context: Context) {
         moveCaretToEnd(node, splice.caret)
         return true
     }
+
+    private fun supportsSetText(node: AccessibilityNodeInfo): Boolean =
+        node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_SET_TEXT }
 
     /** Returns true if the paste succeeded. Always schedules a clipboard restore. */
     private fun pasteViaClipboard(node: AccessibilityNodeInfo, text: String): Boolean {

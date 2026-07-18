@@ -101,12 +101,15 @@ class Pipeline(
                 }
 
                 val focusedNode = FocusAccessibilityService.findFocusedEditable()
-                // The node's own package is ground truth for "which app are we typing
-                // into". currentPackageName() is event-stream noise — the last event
-                // before insertion is usually from Voicey's own pill re-rendering or
-                // the keyboard, which broke correction learning and context labeling.
+                // The live EditorInfo package is ground truth on Android 13+. Older
+                // devices fall back to the node package, then the active app window;
+                // event-stream package names are last-resort noise because the pill and
+                // keyboard both emit events immediately before insertion.
                 val nodePackage = focusedNode?.packageName?.toString().orEmpty()
-                val targetPackage = nodePackage
+                val editorPackage = FocusAccessibilityService.currentEditorPackageName()
+                val targetPackage = editorPackage
+                    .takeIf { it.isNotBlank() }
+                    ?: nodePackage
                     .takeIf { it.isNotBlank() && it != context.packageName }
                     ?: FocusAccessibilityService.currentPackageName()
                 val ctx = ContextReader.read(focusedNode, targetPackage)

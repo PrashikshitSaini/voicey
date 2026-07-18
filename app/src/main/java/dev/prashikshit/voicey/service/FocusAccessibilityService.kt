@@ -2,6 +2,7 @@ package dev.prashikshit.voicey.service
 
 import android.accessibilityservice.AccessibilityService
 import android.graphics.Rect
+import android.os.Build
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
@@ -171,6 +172,46 @@ class FocusAccessibilityService : AccessibilityService() {
         }
 
         fun isEnabled(): Boolean = instance != null
+
+        /**
+         * Inserts text through Android's active editor connection, exactly like an IME.
+         * Available from Android 13 when the accessibility service declares
+         * FLAG_INPUT_METHOD_EDITOR. Unlike ACTION_SET_TEXT, this operates at the live
+         * cursor inside rich editors such as Gmail without reading/replacing their full
+         * accessibility text, and it never touches the clipboard.
+         */
+        fun commitTextAtCursor(text: String): Boolean {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return false
+            val svc = instance ?: return false
+            return try {
+                val accessibilityInputMethod = svc.inputMethod ?: return false
+                if (!accessibilityInputMethod.currentInputStarted) return false
+                val editorPackage = accessibilityInputMethod.currentInputEditorInfo
+                    ?.packageName
+                    .orEmpty()
+                if (editorPackage.isBlank() || editorPackage == svc.packageName) return false
+                val connection = accessibilityInputMethod.currentInputConnection ?: return false
+                connection.commitText(text, 1, null)
+                true
+            } catch (_: RuntimeException) {
+                false
+            }
+        }
+
+        /** Package owning the live editor connection; strongest app-context signal. */
+        fun currentEditorPackageName(): String {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return ""
+            val svc = instance ?: return ""
+            return try {
+                svc.inputMethod
+                    ?.currentInputEditorInfo
+                    ?.packageName
+                    ?.takeIf { it != svc.packageName }
+                    .orEmpty()
+            } catch (_: RuntimeException) {
+                ""
+            }
+        }
 
         /**
          * Returns the currently focused text-input node, or null. Caller must recycle.
