@@ -33,14 +33,31 @@ class Pipeline(
     private val onMessage: (String) -> Unit,
     /** Smoothed 0..1 mic level, ~20 Hz while recording. Called on the capture thread. */
     onAudioLevel: ((Float) -> Unit)? = null,
+    private val onLiveDraftChanged: ((LiveDraftUi) -> Unit)? = null,
 ) {
 
     enum class State { IDLE, RECORDING, PROCESSING, ERROR }
 
-    private val recorder = Recorder(context).apply { levelListener = onAudioLevel }
+    data class LiveDraftUi(
+        val mode: Mode,
+        val stable: String = "",
+        val tentative: String = "",
+    ) {
+        enum class Mode { OFF, LISTENING, DRAFT }
+    }
+
+    private val recorder = Recorder(context).apply {
+        levelListener = onAudioLevel
+        audioChunkListener = ::onAudioChunk
+    }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var processingJob: Job? = null
     private var errorClearJob: Job? = null
+    private var liveDraftJob: Job? = null
+    private var previewRequestJob: Job? = null
+    private val liveDraft = LiveDraftController()
+    @Volatile
+    private var liveDraftSettings: Settings? = null
 
     fun startRecording() {
         // Cancel any pending auto-clear from a recent error so it can't stomp
@@ -52,6 +69,7 @@ class Pipeline(
         try {
             recorder.start()
             updateState(State.RECORDING)
+            beginLiveDraftIfEnabled()
         } catch (e: SecurityException) {
             fail("Microphone permission denied")
         } catch (e: IllegalStateException) {
@@ -67,6 +85,7 @@ class Pipeline(
      */
     fun stopAndProcess() {
         if (!recorder.isRecording()) return
+        stopLiveDraft()
         // recorder.stop() joins a thread for up to 500ms — push it off the main thread.
         processingJob = scope.launch {
             val audioFile = withContext(Dispatchers.IO) { recorder.stop() } ?: run {
@@ -165,6 +184,7 @@ class Pipeline(
     fun cancel() {
         processingJob?.cancel()
         processingJob = null
+        stopLiveDraft()
         if (recorder.isRecording()) {
             recorder.stop()?.delete()
         }
@@ -174,6 +194,63 @@ class Pipeline(
     fun shutdown() {
         cancel()
         scope.cancel()
+    }
+
+    /** Loads the opt-in setting off the main thread so recording starts immediately. */
+    private fun beginLiveDraftIfEnabled() {
+        liveDraftJob?.cancel()
+        liveDraftJob = scope.launch {
+            val settings = withContext(Dispatchers.IO) { Settings.load(context) }
+            if (!recorder.isRecording() || !settings.liveDraftPreview ||
+                FocusAccessibilityService.isPasswordFieldFocused()
+            ) return@launch
+            liveDraftSettings = settings
+            liveDraft.start()
+            onLiveDraftChanged?.invoke(LiveDraftUi(LiveDraftUi.Mode.LISTENING))
+        }
+    }
+
+    /** Called on Recorder's capture thread. It never alters the final recording flow. */
+    private fun onAudioChunk(chunk: ByteArray, length: Int) {
+        if (!liveDraft.isActive()) return
+        if (LiveDraftPrivacyPolicy.mustClearPreview(
+                isPreviewActive = true,
+                isPasswordFieldFocused = FocusAccessibilityService.isPasswordFieldFocused(),
+            )
+        ) {
+            scope.launch { stopLiveDraft() }
+            return
+        }
+        val request = liveDraft.offerPcm(chunk, length) ?: return
+        val settings = liveDraftSettings ?: return
+        previewRequestJob = scope.launch {
+            try {
+                val text = WhisperClient(settings).transcribePreview(request.audio)
+                val draft = liveDraft.complete(text) ?: return@launch
+                onLiveDraftChanged?.invoke(
+                    LiveDraftUi(
+                        mode = if (draft.isEmpty) LiveDraftUi.Mode.LISTENING else LiveDraftUi.Mode.DRAFT,
+                        stable = draft.stable,
+                        tentative = draft.tentative,
+                    )
+                )
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (_: Exception) {
+                // Preview is optional. A failed snapshot must not affect the final pass.
+                if (liveDraft.fail()) onLiveDraftChanged?.invoke(LiveDraftUi(LiveDraftUi.Mode.OFF))
+            }
+        }
+    }
+
+    private fun stopLiveDraft() {
+        liveDraftJob?.cancel()
+        liveDraftJob = null
+        previewRequestJob?.cancel()
+        previewRequestJob = null
+        liveDraft.stop()
+        liveDraftSettings = null
+        onLiveDraftChanged?.invoke(LiveDraftUi(LiveDraftUi.Mode.OFF))
     }
 
     private fun fail(message: String) {

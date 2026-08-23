@@ -278,11 +278,36 @@
             android:text="@string/sound_feedback_label" />
 
         <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/switch_live_draft_preview"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/live_draft_preview_label" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:layout_marginTop="2dp"
+            android:layout_marginEnd="4dp"
+            android:text="@string/live_draft_preview_helper"
+            android:textAppearance="?attr/textAppearanceBodySmall" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
             android:id="@+id/switch_learn_corrections"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
             android:text="@string/learn_corrections_label" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:layout_marginTop="2dp"
+            android:layout_marginEnd="4dp"
+            android:text="@string/learn_corrections_helper"
+            android:textAppearance="?attr/textAppearanceBodySmall" />
 
         <com.google.android.material.materialswitch.MaterialSwitch
             android:id="@+id/switch_smart_formatting"

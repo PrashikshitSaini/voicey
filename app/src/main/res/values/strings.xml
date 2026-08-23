@@ -34,7 +34,18 @@
     <string name="hold_to_talk_label">Hold to talk (release to stop)</string>
     <string name="show_only_while_typing_label">Show pill only while typing</string>
     <string name="sound_feedback_label">Sound on record start/stop</string>
-    <string name="learn_corrections_label">Learn from my spelling fixes</string>
+    <string name="live_draft_preview_label">Live draft preview</string>
+    <string name="live_draft_preview_helper">Shows a temporary draft while you speak. Voicey sends extra short transcription requests to your configured provider, which may use more data and API quota. Draft text can change, is never pasted, and is cleared when dictation ends.</string>
+    <string name="live_draft_preview_confirm_title">Live draft preview</string>
+    <string name="live_draft_preview_confirm_message">While you speak, Voicey sends extra short transcription requests to your configured provider. This may use more data and API quota. Draft wording can change and is never pasted.</string>
+    <string name="live_draft_preview_turn_on">Turn on</string>
+    <string name="live_draft_preview_not_now">Not now</string>
+    <string name="learn_corrections_label">Learn every word I correct</string>
+    <string name="learn_corrections_helper">After dictation, edit a word normally. Voicey learns it after a short pause and shows a card with Undo.</string>
+    <string name="learned_correction_message">Learned “%1$s” → “%2$s”</string>
+    <string name="learned_corrections_count">Learned %1$d corrections</string>
+    <string name="undo_learning">Undo</string>
+    <string name="correction_forgotten">Correction forgotten</string>
     <string name="smart_formatting_label">Smart app-aware formatting</string>
     <string name="smart_formatting_helper">Adapts longer dictation to the active app: polished email paragraphs, bullets or numbered steps for real lists, concise messages, and structured notes.</string>
     <string name="never_use_clipboard_label">Never use the clipboard</string>
@@ -71,6 +82,10 @@
     <string name="pill_tap_to_speak">Tap to speak</string>
     <string name="pill_processing">Polishing…</string>
     <string name="pill_error">Try again</string>
+    <string name="discard_dictation">Discard dictation</string>
+    <string name="dictation_discarded">Dictation discarded</string>
+    <string name="live_draft_listening">Listening…</string>
+    <string name="live_draft_may_change">Draft · may change</string>
 
     <string name="permission_overlay_button">Grant overlay permission</string>
     <string name="permission_accessibility_button">Enable accessibility service</string>

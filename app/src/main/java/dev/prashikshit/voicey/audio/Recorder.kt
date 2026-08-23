@@ -40,6 +40,13 @@ class Recorder(private val context: Context) {
     @Volatile
     var levelListener: ((Float) -> Unit)? = null
 
+    /**
+     * Receives each PCM capture chunk on the recorder thread. Consumers must copy any
+     * bytes they retain: the recorder reuses its buffer for the next read.
+     */
+    @Volatile
+    var audioChunkListener: ((ByteArray, Int) -> Unit)? = null
+
     @SuppressLint("MissingPermission")
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     fun start() {
@@ -102,6 +109,7 @@ class Recorder(private val context: Context) {
                         fos.write(buf, 0, read)
                         pcmBytesWritten += read
                         publishLevel(buf, read)
+                        audioChunkListener?.invoke(buf, read)
                     } else if (read < 0) {
                         // Read error — surface as silent abort; caller observes empty file.
                         break

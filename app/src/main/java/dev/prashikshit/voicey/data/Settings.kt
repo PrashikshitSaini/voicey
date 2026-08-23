@@ -29,6 +29,10 @@ data class Settings(
     val neverUseClipboard: Boolean,
     /** Let cleanup adapt structure to email, messaging, notes, and document apps. */
     val smartFormatting: Boolean,
+    /** Show an opt-in, temporary draft by making extra short transcription requests. */
+    val liveDraftPreview: Boolean,
+    /** Whether the extra-request disclosure was acknowledged at least once. */
+    val liveDraftPreviewDisclosureAccepted: Boolean,
 ) {
     fun isReady(): Boolean = apiKey.isNotBlank() && apiBase.isNotBlank()
 
@@ -106,6 +110,11 @@ Output rules:
                 learnCorrections = store.getBoolean(KEY_LEARN_CORRECTIONS, true),
                 neverUseClipboard = store.getBoolean(KEY_NEVER_USE_CLIPBOARD, false),
                 smartFormatting = store.getBoolean(KEY_SMART_FORMATTING, true),
+                liveDraftPreview = store.getBoolean(KEY_LIVE_DRAFT_PREVIEW, false),
+                liveDraftPreviewDisclosureAccepted = store.getBoolean(
+                    KEY_LIVE_DRAFT_PREVIEW_DISCLOSURE_ACCEPTED,
+                    false,
+                ),
             )
         }
 
@@ -126,6 +135,11 @@ Output rules:
             store.putBoolean(KEY_LEARN_CORRECTIONS, settings.learnCorrections)
             store.putBoolean(KEY_NEVER_USE_CLIPBOARD, settings.neverUseClipboard)
             store.putBoolean(KEY_SMART_FORMATTING, settings.smartFormatting)
+            store.putBoolean(KEY_LIVE_DRAFT_PREVIEW, settings.liveDraftPreview)
+            store.putBoolean(
+                KEY_LIVE_DRAFT_PREVIEW_DISCLOSURE_ACCEPTED,
+                settings.liveDraftPreviewDisclosureAccepted,
+            )
         }
 
         private const val KEY_API_BASE = "api_base"
@@ -141,5 +155,8 @@ Output rules:
         private const val KEY_LEARN_CORRECTIONS = "learn_corrections"
         private const val KEY_NEVER_USE_CLIPBOARD = "never_use_clipboard"
         private const val KEY_SMART_FORMATTING = "smart_formatting"
+        private const val KEY_LIVE_DRAFT_PREVIEW = "live_draft_preview"
+        private const val KEY_LIVE_DRAFT_PREVIEW_DISCLOSURE_ACCEPTED =
+            "live_draft_preview_disclosure_accepted"
     }
 }

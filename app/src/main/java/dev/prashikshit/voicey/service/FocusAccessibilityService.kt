@@ -124,6 +124,9 @@ class FocusAccessibilityService : AccessibilityService() {
         @Volatile
         private var passwordFieldFocused: Boolean = false
 
+        /** Live previews must never reveal a password dictation in an overlay. */
+        fun isPasswordFieldFocused(): Boolean = passwordFieldFocused
+
         /**
          * Notified with (shouldShowBubble, keyboardTop) whenever keyboard visibility,
          * keyboard bounds, or password-field focus changes. shouldShowBubble is false

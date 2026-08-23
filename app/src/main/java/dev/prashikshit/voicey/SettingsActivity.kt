@@ -31,6 +31,8 @@ import dev.prashikshit.voicey.service.FocusAccessibilityService
 class SettingsActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivitySettingsBinding
+    private var revertingLiveDraftToggle = false
+    private var liveDraftDisclosurePending = false
 
     private val requestRecordAudio = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -54,6 +56,7 @@ class SettingsActivity : AppCompatActivity() {
         bindFields(Settings.load(this))
         wireModelDropdowns()
         wireModelStatus()
+        wireLiveDraftPreview()
         wirePermissionButtons()
         wireBubbleToggle()
         wireResetButton()
@@ -69,6 +72,9 @@ class SettingsActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
+        // The switch is already reverted before a disclosure is shown. Clear the
+        // pending marker here too, so navigating away can never turn it on later.
+        liveDraftDisclosurePending = false
         save()
     }
 
@@ -84,6 +90,7 @@ class SettingsActivity : AppCompatActivity() {
         switchHoldToTalk.isChecked = settings.holdToTalk
         switchShowOnlyWhileTyping.isChecked = settings.showOnlyWhileTyping
         switchSoundFeedback.isChecked = settings.soundFeedback
+        switchLiveDraftPreview.isChecked = settings.liveDraftPreview
         switchLearnCorrections.isChecked = settings.learnCorrections
         switchNeverUseClipboard.isChecked = settings.neverUseClipboard
         switchSmartFormatting.isChecked = settings.smartFormatting
@@ -109,6 +116,38 @@ class SettingsActivity : AppCompatActivity() {
     private fun wireModelStatus() {
         binding.inputCleanupModel.doAfterTextChanged { refreshModelStatus() }
         refreshModelStatus()
+    }
+
+    private fun wireLiveDraftPreview() {
+        binding.switchLiveDraftPreview.setOnCheckedChangeListener { _, enabled ->
+            if (!enabled || revertingLiveDraftToggle) return@setOnCheckedChangeListener
+            if (Settings.load(this).liveDraftPreviewDisclosureAccepted) {
+                return@setOnCheckedChangeListener
+            }
+            // A toggle is not consent. Revert it before showing the disclosure so
+            // Back, tapping outside, or leaving this screen always retains "off".
+            revertingLiveDraftToggle = true
+            binding.switchLiveDraftPreview.isChecked = false
+            revertingLiveDraftToggle = false
+            liveDraftDisclosurePending = true
+            AlertDialog.Builder(this)
+                .setTitle(R.string.live_draft_preview_confirm_title)
+                .setMessage(R.string.live_draft_preview_confirm_message)
+                .setPositiveButton(R.string.live_draft_preview_turn_on) { _, _ ->
+                    if (!liveDraftDisclosurePending) return@setPositiveButton
+                    liveDraftDisclosurePending = false
+                    Settings.save(
+                        this,
+                        Settings.load(this).copy(liveDraftPreviewDisclosureAccepted = true),
+                    )
+                    revertingLiveDraftToggle = true
+                    binding.switchLiveDraftPreview.isChecked = true
+                    revertingLiveDraftToggle = false
+                }
+                .setNegativeButton(R.string.live_draft_preview_not_now, null)
+                .setOnDismissListener { liveDraftDisclosurePending = false }
+                .show()
+        }
     }
 
     private fun refreshModelStatus() {
@@ -137,6 +176,9 @@ class SettingsActivity : AppCompatActivity() {
             learnCorrections = binding.switchLearnCorrections.isChecked,
             neverUseClipboard = binding.switchNeverUseClipboard.isChecked,
             smartFormatting = binding.switchSmartFormatting.isChecked,
+            liveDraftPreview = binding.switchLiveDraftPreview.isChecked,
+            liveDraftPreviewDisclosureAccepted = Settings.load(this)
+                .liveDraftPreviewDisclosureAccepted,
         )
         Settings.save(this, current)
     }

@@ -8,9 +8,12 @@ import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.asRequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.util.concurrent.TimeUnit
 
 /**
@@ -54,8 +57,52 @@ class WhisperClient(private val settings: Settings) {
         // verbatim spoken dictation…" caused that exact phrase to appear in the
         // output on silent taps. The only legitimate use of `prompt` is keyword
         // biasing, so we only send it when the user has configured vocabulary terms.
-        val vocabPrompt = settings.vocabulary.joinToString(", ").trim()
+        transcribeBody(
+            filename = audio.name,
+            body = audio.asRequestBody("audio/wav".toMediaType()),
+            vocabularyPrompt = settings.vocabulary.joinToString(", ").trim(),
+        )
+    }
 
+    /**
+     * A lightweight, non-persistent live preview. Unlike the final request, it sends
+     * no vocabulary, focused-field context, corrections, or cleanup instructions.
+     */
+    suspend fun transcribePreview(pcmWav: ByteArray): String = withContext(Dispatchers.IO) {
+        if (pcmWav.isEmpty()) throw TranscriptionException("Preview audio is empty")
+        if (!settings.isReady()) throw TranscriptionException("API key or base URL is missing")
+        val wav = pcmToWav(pcmWav)
+        transcribeBody(
+            filename = "voicey-live-preview.wav",
+            body = wav.toRequestBody("audio/wav".toMediaType()),
+            vocabularyPrompt = "",
+        )
+    }
+
+    /** Wraps in-memory 16 kHz PCM in a WAV header without creating a preview file. */
+    private fun pcmToWav(pcm: ByteArray): ByteArray {
+        val header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN).apply {
+            put("RIFF".toByteArray(Charsets.US_ASCII))
+            putInt(pcm.size + 36)
+            put("WAVEfmt ".toByteArray(Charsets.US_ASCII))
+            putInt(16)
+            putShort(1)
+            putShort(1)
+            putInt(16_000)
+            putInt(32_000)
+            putShort(2)
+            putShort(16)
+            put("data".toByteArray(Charsets.US_ASCII))
+            putInt(pcm.size)
+        }.array()
+        return header + pcm
+    }
+
+    private fun transcribeBody(
+        filename: String,
+        body: okhttp3.RequestBody,
+        vocabularyPrompt: String,
+    ): String {
         val multipartBuilder = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
             .addFormDataPart("model", settings.transcriptionModel)
@@ -66,29 +113,23 @@ class WhisperClient(private val settings: Settings) {
         if (settings.language.isNotBlank()) {
             multipartBuilder.addFormDataPart("language", settings.language)
         }
-        if (vocabPrompt.isNotEmpty()) {
-            multipartBuilder.addFormDataPart("prompt", vocabPrompt)
+        if (vocabularyPrompt.isNotEmpty()) {
+            multipartBuilder.addFormDataPart("prompt", vocabularyPrompt)
         }
-        multipartBuilder.addFormDataPart(
-            "file",
-            audio.name,
-            audio.asRequestBody("audio/wav".toMediaType()),
-        )
-        val multipart = multipartBuilder.build()
-
+        multipartBuilder.addFormDataPart("file", filename, body)
         val request = Request.Builder()
             .url("${settings.apiBase.trimEnd('/')}/audio/transcriptions")
             .addHeader("Authorization", "Bearer ${settings.apiKey}")
-            .post(multipart)
+            .post(multipartBuilder.build())
             .build()
 
         try {
             client.newCall(request).execute().use { response ->
-                val body = response.body?.string().orEmpty()
+                val responseBody = response.body?.string().orEmpty()
                 if (!response.isSuccessful) {
-                    throw TranscriptionException("HTTP ${response.code}: ${body.take(200)}")
+                    throw TranscriptionException("HTTP ${response.code}: ${responseBody.take(200)}")
                 }
-                parseAndFilter(body)
+                return parseAndFilter(responseBody)
             }
         } catch (e: IOException) {
             throw TranscriptionException("Network failure: ${e.message ?: e.javaClass.simpleName}", e)

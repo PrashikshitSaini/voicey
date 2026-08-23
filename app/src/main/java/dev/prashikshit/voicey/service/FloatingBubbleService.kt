@@ -7,6 +7,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.PixelFormat
+import android.text.SpannableStringBuilder
+import android.text.style.ForegroundColorSpan
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -17,14 +19,17 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
+import android.widget.ImageButton
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.ColorUtils
 import androidx.lifecycle.LifecycleService
 import dev.prashikshit.voicey.R
 import dev.prashikshit.voicey.SettingsActivity
 import dev.prashikshit.voicey.VoiceyApp
+import dev.prashikshit.voicey.data.Correction
 import dev.prashikshit.voicey.data.Settings
 import dev.prashikshit.voicey.ui.SpectrumView
 import kotlin.math.abs
@@ -49,10 +54,16 @@ class FloatingBubbleService : LifecycleService() {
     private lateinit var bubbleView: FrameLayout
     private lateinit var bubbleLabel: TextView
     private lateinit var bubbleSpectrum: SpectrumView
+    private lateinit var bubbleDiscard: ImageButton
+    private lateinit var liveDraftContent: View
+    private lateinit var liveDraftStatus: TextView
+    private lateinit var liveDraftText: TextView
     private lateinit var layoutParams: WindowManager.LayoutParams
     private lateinit var injector: TextInjector
     private lateinit var pipeline: Pipeline
     private val mainHandler = Handler(Looper.getMainLooper())
+    private var learningCardView: View? = null
+    private val dismissLearningCardRunnable = Runnable { removeLearningCard() }
 
     private var initialX = 0
     private var initialY = 0
@@ -67,6 +78,11 @@ class FloatingBubbleService : LifecycleService() {
     private val density: Float get() = resources.displayMetrics.density
     private val pillWidthPx: Int get() = (PILL_WIDTH_DP * density).toInt()
     private val pillHeightPx: Int get() = (PILL_HEIGHT_DP * density).toInt()
+    private val draftHeightPx: Int get() = (DRAFT_HEIGHT_DP * density).toInt()
+    private val draftWidthPx: Int get() = minOf(
+        (DRAFT_WIDTH_DP * density).toInt(),
+        resources.displayMetrics.widthPixels - (32 * density).toInt(),
+    )
 
     // Cached on service start so we don't decrypt EncryptedSharedPreferences on every
     // ACTION_DOWN event. Setting changes apply on bubble restart.
@@ -95,12 +111,14 @@ class FloatingBubbleService : LifecycleService() {
             onStateChanged = ::renderState,
             onMessage = ::showTransientMessage,
             onAudioLevel = ::onAudioLevel,
+            onLiveDraftChanged = ::renderLiveDraft,
         )
         val settings = Settings.load(this)
         holdToTalkEnabled = settings.holdToTalk
         showOnlyWhileTyping = settings.showOnlyWhileTyping
         if (settings.soundFeedback) soundFeedback = SoundFeedback(this)
         addBubble()
+        CorrectionLearner.setFeedbackListener(::showLearningFeedback)
         // Delivers the current keyboard state immediately, so the pill starts hidden
         // when no keyboard is open (and positioned correctly when one already is).
         FocusAccessibilityService.setKeyboardListener(::onKeyboardStateChanged)
@@ -121,8 +139,10 @@ class FloatingBubbleService : LifecycleService() {
     }
 
     override fun onDestroy() {
+        CorrectionLearner.setFeedbackListener(null)
         FocusAccessibilityService.setKeyboardListener(null)
         mainHandler.removeCallbacksAndMessages(null)
+        removeLearningCard()
         soundFeedback?.release()
         soundFeedback = null
         pipeline.shutdown()
@@ -245,6 +265,10 @@ class FloatingBubbleService : LifecycleService() {
         bubbleView = LayoutInflater.from(this).inflate(R.layout.bubble_overlay, null) as FrameLayout
         bubbleLabel = bubbleView.findViewById(R.id.bubble_label)
         bubbleSpectrum = bubbleView.findViewById(R.id.bubble_spectrum)
+        bubbleDiscard = bubbleView.findViewById(R.id.bubble_discard)
+        liveDraftContent = bubbleView.findViewById(R.id.live_draft_content)
+        liveDraftStatus = bubbleView.findViewById(R.id.live_draft_status)
+        liveDraftText = bubbleView.findViewById(R.id.live_draft_text)
 
         val overlayType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -269,6 +293,7 @@ class FloatingBubbleService : LifecycleService() {
             y = resources.displayMetrics.heightPixels - pillHeightPx - (FALLBACK_BOTTOM_MARGIN_DP * density).toInt()
         }
 
+        bubbleDiscard.setOnClickListener(::discardCurrentDictation)
         bubbleView.setOnTouchListener(::handleTouch)
         // Start invisible when keyboard-aware mode will decide visibility; the listener
         // registration in onCreate immediately delivers the real state.
@@ -391,6 +416,14 @@ class FloatingBubbleService : LifecycleService() {
         }
     }
 
+    /** Stops and permanently drops the active recording before any transcription starts. */
+    private fun discardCurrentDictation(view: View) {
+        if (currentState != Pipeline.State.RECORDING) return
+        pipeline.cancel()
+        view.announceForAccessibility(getString(R.string.dictation_discarded))
+        showTransientMessage(getString(R.string.dictation_discarded))
+    }
+
     private fun startHoldToTalk() {
         isLongPressing = true
         pipeline.startRecording()
@@ -431,10 +464,13 @@ class FloatingBubbleService : LifecycleService() {
             if (state == Pipeline.State.RECORDING) {
                 bubbleLabel.visibility = View.GONE
                 bubbleSpectrum.visibility = View.VISIBLE
+                bubbleDiscard.visibility = View.VISIBLE
                 bubbleSpectrum.startAnimating()
             } else {
+                hideLiveDraft()
                 bubbleSpectrum.stopAnimating()
                 bubbleSpectrum.visibility = View.GONE
+                bubbleDiscard.visibility = View.GONE
                 bubbleLabel.visibility = View.VISIBLE
                 bubbleLabel.setText(
                     when (state) {
@@ -456,11 +492,151 @@ class FloatingBubbleService : LifecycleService() {
         if (::bubbleSpectrum.isInitialized) bubbleSpectrum.setLevel(level)
     }
 
+    /** Renders an in-memory preview only; it never interacts with the focused editor. */
+    private fun renderLiveDraft(draft: Pipeline.LiveDraftUi) {
+        mainHandler.post {
+            if (!::liveDraftContent.isInitialized) return@post
+            when (draft.mode) {
+                Pipeline.LiveDraftUi.Mode.OFF -> hideLiveDraft()
+                Pipeline.LiveDraftUi.Mode.LISTENING -> {
+                    liveDraftStatus.setText(R.string.live_draft_listening)
+                    liveDraftText.text = ""
+                    showLiveDraft()
+                }
+                Pipeline.LiveDraftUi.Mode.DRAFT -> {
+                    liveDraftStatus.setText(R.string.live_draft_may_change)
+                    liveDraftText.text = buildDraftText(draft)
+                    showLiveDraft()
+                }
+            }
+        }
+    }
+
+    private fun showLiveDraft() {
+        if (currentState != Pipeline.State.RECORDING) return
+        liveDraftContent.visibility = View.VISIBLE
+        resizeBubble(expanded = true)
+    }
+
+    private fun buildDraftText(draft: Pipeline.LiveDraftUi): CharSequence {
+        val text = SpannableStringBuilder()
+        if (draft.stable.isNotBlank()) text.append(draft.stable)
+        if (draft.tentative.isNotBlank()) {
+            if (text.isNotEmpty()) text.append(' ')
+            val tentativeStart = text.length
+            text.append(draft.tentative)
+            text.setSpan(
+                ForegroundColorSpan(
+                    ColorUtils.setAlphaComponent(
+                        ContextCompat.getColor(this, R.color.bubble_icon),
+                        TENTATIVE_TEXT_ALPHA,
+                    )
+                ),
+                tentativeStart,
+                text.length,
+                0,
+            )
+        }
+        return text
+    }
+
+    private fun hideLiveDraft() {
+        if (!::liveDraftContent.isInitialized) return
+        liveDraftContent.visibility = View.GONE
+        liveDraftText.text = ""
+        resizeBubble(expanded = false)
+    }
+
+    private fun resizeBubble(expanded: Boolean) {
+        if (!::bubbleView.isInitialized || !bubbleView.isAttachedToWindow) return
+        val width = if (expanded) draftWidthPx else pillWidthPx
+        val height = if (expanded) draftHeightPx else pillHeightPx
+        if (layoutParams.width == width && layoutParams.height == height) return
+        val oldHeight = layoutParams.height
+        layoutParams.width = width
+        layoutParams.height = height
+        layoutParams.x = (resources.displayMetrics.widthPixels - width) / 2
+        // Preserve the bottom edge when the keyboard position is temporarily unknown.
+        layoutParams.y = (layoutParams.y - (height - oldHeight)).coerceAtLeast(0)
+        windowManager.updateViewLayout(bubbleView, layoutParams)
+    }
+
     private fun showTransientMessage(message: String) {
         mainHandler.post {
             Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
         }
     }
+
+    /** Shows an immediate, undoable receipt whenever the learner stores an edit. */
+    private fun showLearningFeedback(corrections: List<Correction>) {
+        if (corrections.isEmpty()) return
+        mainHandler.post {
+            removeLearningCard()
+            val card = LayoutInflater.from(this).inflate(R.layout.learning_overlay, null)
+            val message = card.findViewById<TextView>(R.id.learning_message)
+            message.text = if (corrections.size == 1) {
+                getString(
+                    R.string.learned_correction_message,
+                    corrections.single().wrong,
+                    corrections.single().right,
+                )
+            } else {
+                getString(R.string.learned_corrections_count, corrections.size)
+            }
+            card.findViewById<View>(R.id.btn_undo_learning).setOnClickListener {
+                CorrectionLearner.forget(this, corrections)
+                removeLearningCard()
+            }
+
+            val width = minOf(
+                (LEARNING_CARD_WIDTH_DP * density).toInt(),
+                resources.displayMetrics.widthPixels - (32 * density).toInt(),
+            )
+            val params = WindowManager.LayoutParams(
+                width,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                overlayWindowType(),
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT,
+            ).apply {
+                gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                y = (layoutParams.y - (LEARNING_CARD_OFFSET_DP * density).toInt())
+                    .coerceAtLeast((24 * density).toInt())
+            }
+            try {
+                windowManager.addView(card, params)
+                learningCardView = card
+                mainHandler.postDelayed(dismissLearningCardRunnable, LEARNING_CARD_DURATION_MS)
+            } catch (_: RuntimeException) {
+                // If Android revokes or temporarily rejects overlay access, learning has
+                // already succeeded. Preserve feedback without crashing the bubble.
+                Toast.makeText(this, message.text, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun removeLearningCard() {
+        mainHandler.removeCallbacks(dismissLearningCardRunnable)
+        val card = learningCardView ?: return
+        learningCardView = null
+        if (card.isAttachedToWindow) {
+            try {
+                windowManager.removeView(card)
+            } catch (_: IllegalArgumentException) {
+                // Window was already removed while the service was shutting down.
+            }
+        }
+    }
+
+    private fun overlayWindowType(): Int =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        } else {
+            @Suppress("DEPRECATION")
+            WindowManager.LayoutParams.TYPE_PHONE
+        }
 
     companion object {
         private const val ACTION_STOP = "dev.prashikshit.voicey.STOP_BUBBLE"
@@ -468,9 +644,15 @@ class FloatingBubbleService : LifecycleService() {
         private const val RESTART_DELAY_MS = 1_000L
         private const val PILL_WIDTH_DP = 160
         private const val PILL_HEIGHT_DP = 48
+        private const val DRAFT_WIDTH_DP = 320
+        private const val DRAFT_HEIGHT_DP = 92
+        private const val TENTATIVE_TEXT_ALPHA = 165
         private const val PILL_KEYBOARD_MARGIN_DP = 12
         private const val FALLBACK_BOTTOM_MARGIN_DP = 120
         private const val FADE_MS = 150L
+        private const val LEARNING_CARD_WIDTH_DP = 320
+        private const val LEARNING_CARD_OFFSET_DP = 84
+        private const val LEARNING_CARD_DURATION_MS = 7_000L
 
         fun start(context: Context) {
             val intent = Intent(context, FloatingBubbleService::class.java)
