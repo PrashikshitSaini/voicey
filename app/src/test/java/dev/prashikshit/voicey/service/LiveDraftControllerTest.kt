@@ -21,7 +21,7 @@ class LiveDraftControllerTest {
         controller.start()
 
         assertNotNull(controller.offerPcm(byteArrayOf(1, 2, 3, 4)))
-        now = 2_000
+        now = 1_000
         assertNull(controller.offerPcm(byteArrayOf(5, 6, 7, 8)))
 
         controller.complete("hello")
