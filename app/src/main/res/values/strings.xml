@@ -12,6 +12,11 @@
     <string name="section_language_dictionary">Language &amp; dictionary</string>
     <string name="section_experience">Experience</string>
 
+    <string name="microphone_label">Microphone input</string>
+    <string name="microphone_hint">Choose an input</string>
+    <string name="microphone_helper">System default is used if the selected microphone is unavailable.</string>
+    <string name="microphone_system_default">System default</string>
+
     <string name="api_provider_label">API endpoint</string>
     <string name="api_provider_hint">https://api.groq.com/openai/v1</string>
 

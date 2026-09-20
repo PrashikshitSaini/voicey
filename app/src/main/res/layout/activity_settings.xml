@@ -103,6 +103,22 @@
             android:layout_marginBottom="4dp"
             android:background="?attr/colorOutlineVariant" />
 
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:hint="@string/microphone_label"
+            app:boxBackgroundMode="outline"
+            app:endIconMode="dropdown_menu"
+            app:helperText="@string/microphone_helper">
+            <com.google.android.material.textfield.MaterialAutoCompleteTextView
+                android:id="@+id/input_microphone"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="none"
+                android:hint="@string/microphone_hint" />
+        </com.google.android.material.textfield.TextInputLayout>
+
         <TextView
             style="@style/TextAppearance.Voicey.Section"
             android:layout_width="match_parent"

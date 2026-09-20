@@ -5,6 +5,8 @@ import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -33,6 +35,8 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var binding: ActivitySettingsBinding
     private var revertingLiveDraftToggle = false
     private var liveDraftDisclosurePending = false
+    private var microphoneOptions = emptyList<MicrophoneOption>()
+    private var selectedMicrophoneDeviceId = 0
 
     private val requestRecordAudio = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -55,6 +59,8 @@ class SettingsActivity : AppCompatActivity() {
 
         bindFields(Settings.load(this))
         wireModelDropdowns()
+        wireMicrophoneDropdown()
+        refreshMicrophoneDevices()
         wireModelStatus()
         wireLiveDraftPreview()
         wirePermissionButtons()
@@ -66,6 +72,7 @@ class SettingsActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         refreshPermissionStates()
+        refreshMicrophoneDevices()
         refreshBubbleButton()
         refreshDictionarySummary()
     }
@@ -94,6 +101,7 @@ class SettingsActivity : AppCompatActivity() {
         switchLearnCorrections.isChecked = settings.learnCorrections
         switchNeverUseClipboard.isChecked = settings.neverUseClipboard
         switchSmartFormatting.isChecked = settings.smartFormatting
+        selectedMicrophoneDeviceId = settings.microphoneDeviceId
     }
 
     /**
@@ -111,6 +119,47 @@ class SettingsActivity : AppCompatActivity() {
         binding.inputLanguage.setAdapter(
             NoFilterArrayAdapter(this, LanguageCatalog.labels)
         )
+    }
+
+    private fun wireMicrophoneDropdown() {
+        binding.inputMicrophone.setOnItemClickListener { _, _, position, _ ->
+            selectedMicrophoneDeviceId = microphoneOptions.getOrNull(position)?.id ?: 0
+        }
+    }
+
+    private fun refreshMicrophoneDevices() {
+        val audioManager = getSystemService(AudioManager::class.java)
+        microphoneOptions = buildList {
+            add(MicrophoneOption(0, getString(R.string.microphone_system_default)))
+            audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS)
+                .filter { it.isSource }
+                .forEach { device ->
+                    add(MicrophoneOption(device.id, microphoneLabel(device)))
+                }
+        }
+
+        val savedId = Settings.load(this).microphoneDeviceId
+        selectedMicrophoneDeviceId = microphoneOptions.firstOrNull { it.id == savedId }?.id ?: 0
+        binding.inputMicrophone.setAdapter(
+            NoFilterArrayAdapter(this, microphoneOptions.map(MicrophoneOption::label))
+        )
+        binding.inputMicrophone.setText(
+            microphoneOptions.first { it.id == selectedMicrophoneDeviceId }.label,
+            false,
+        )
+    }
+
+    private fun microphoneLabel(device: AudioDeviceInfo): String {
+        val name = device.productName?.toString()?.trim().orEmpty()
+        val type = when (device.type) {
+            AudioDeviceInfo.TYPE_BUILTIN_MIC -> "Built-in microphone"
+            AudioDeviceInfo.TYPE_WIRED_HEADSET -> "Wired headset"
+            AudioDeviceInfo.TYPE_USB_DEVICE, AudioDeviceInfo.TYPE_USB_HEADSET -> "USB microphone"
+            AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "Bluetooth headset"
+            AudioDeviceInfo.TYPE_LINE_ANALOG, AudioDeviceInfo.TYPE_LINE_DIGITAL -> "Line input"
+            else -> "Input device"
+        }
+        return if (name.isBlank() || name.equals(type, ignoreCase = true)) type else "$name · $type"
     }
 
     private fun wireModelStatus() {
@@ -179,6 +228,7 @@ class SettingsActivity : AppCompatActivity() {
             liveDraftPreview = binding.switchLiveDraftPreview.isChecked,
             liveDraftPreviewDisclosureAccepted = Settings.load(this)
                 .liveDraftPreviewDisclosureAccepted,
+            microphoneDeviceId = selectedMicrophoneDeviceId,
         )
         Settings.save(this, current)
     }
@@ -387,4 +437,6 @@ class SettingsActivity : AppCompatActivity() {
 
         override fun getFilter(): Filter = noFilter
     }
+
+    private data class MicrophoneOption(val id: Int, val label: String)
 }

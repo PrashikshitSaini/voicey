@@ -5,6 +5,8 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.media.AudioFormat
 import android.media.AudioRecord
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.media.MediaRecorder
 import androidx.annotation.RequiresPermission
 import java.io.File
@@ -49,7 +51,7 @@ class Recorder(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
-    fun start() {
+    fun start(microphoneDeviceId: Int = 0) {
         check(record == null) { "Recorder already started" }
 
         val minBuffer = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT)
@@ -68,6 +70,21 @@ class Recorder(private val context: Context) {
         if (ar.state != AudioRecord.STATE_INITIALIZED) {
             ar.release()
             throw IllegalStateException("AudioRecord failed to initialize")
+        }
+
+        if (microphoneDeviceId != 0) {
+            // Device IDs can become stale when a headset or USB mic is disconnected.
+            // A failed preference is intentionally non-fatal: Android keeps system routing.
+            val device = (context.getSystemService(Context.AUDIO_SERVICE) as AudioManager)
+                .getDevices(AudioManager.GET_DEVICES_INPUTS)
+                .firstOrNull { it.id == microphoneDeviceId && it.isSource }
+            if (device != null) {
+                try {
+                    ar.setPreferredDevice(device)
+                } catch (_: RuntimeException) {
+                    // Continue with the default input route.
+                }
+            }
         }
 
         val out = File.createTempFile("voicey-", ".wav", context.cacheDir).apply {

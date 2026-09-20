@@ -67,7 +67,7 @@ class Pipeline(
 
         if (recorder.isRecording()) return
         try {
-            recorder.start()
+            recorder.start(Settings.load(context).microphoneDeviceId)
             updateState(State.RECORDING)
             beginLiveDraftIfEnabled()
         } catch (e: SecurityException) {

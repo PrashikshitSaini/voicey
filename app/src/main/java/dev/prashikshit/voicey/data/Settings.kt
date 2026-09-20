@@ -33,6 +33,8 @@ data class Settings(
     val liveDraftPreview: Boolean,
     /** Whether the extra-request disclosure was acknowledged at least once. */
     val liveDraftPreviewDisclosureAccepted: Boolean,
+    /** Android AudioDeviceInfo ID, or 0 to use system microphone routing. */
+    val microphoneDeviceId: Int = 0,
 ) {
     fun isReady(): Boolean = apiKey.isNotBlank() && apiBase.isNotBlank()
 
@@ -115,6 +117,7 @@ Output rules:
                     KEY_LIVE_DRAFT_PREVIEW_DISCLOSURE_ACCEPTED,
                     false,
                 ),
+                microphoneDeviceId = store.getString(KEY_MICROPHONE_DEVICE_ID, "0").toIntOrNull() ?: 0,
             )
         }
 
@@ -140,6 +143,7 @@ Output rules:
                 KEY_LIVE_DRAFT_PREVIEW_DISCLOSURE_ACCEPTED,
                 settings.liveDraftPreviewDisclosureAccepted,
             )
+            store.putString(KEY_MICROPHONE_DEVICE_ID, settings.microphoneDeviceId.toString())
         }
 
         private const val KEY_API_BASE = "api_base"
@@ -158,5 +162,6 @@ Output rules:
         private const val KEY_LIVE_DRAFT_PREVIEW = "live_draft_preview"
         private const val KEY_LIVE_DRAFT_PREVIEW_DISCLOSURE_ACCEPTED =
             "live_draft_preview_disclosure_accepted"
+        private const val KEY_MICROPHONE_DEVICE_ID = "microphone_device_id"
     }
 }
