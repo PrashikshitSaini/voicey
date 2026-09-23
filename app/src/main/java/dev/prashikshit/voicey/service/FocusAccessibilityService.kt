@@ -22,6 +22,8 @@ import android.view.accessibility.AccessibilityWindowInfo
  */
 class FocusAccessibilityService : AccessibilityService() {
 
+    enum class ActiveEditorStatus { ACTIVE, INACTIVE, UNKNOWN }
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
@@ -51,11 +53,12 @@ class FocusAccessibilityService : AccessibilityService() {
         when (event.eventType) {
             AccessibilityEvent.TYPE_WINDOWS_CHANGED -> refreshKeyboardState()
             AccessibilityEvent.TYPE_VIEW_FOCUSED -> {
-                val source = event.source ?: return
-                passwordFieldFocused = source.isPassword
-                @Suppress("DEPRECATION")
-                source.recycle()
-                notifyListener()
+                event.source?.let { source ->
+                    passwordFieldFocused = source.isPassword
+                    @Suppress("DEPRECATION")
+                    source.recycle()
+                }
+                notifyListener(force = true)
             }
             AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> {
                 // This event fires on every keystroke in every app. Gate on an active
@@ -79,8 +82,8 @@ class FocusAccessibilityService : AccessibilityService() {
                 // App/window switch — any remembered password-field focus is stale.
                 if (passwordFieldFocused) {
                     passwordFieldFocused = false
-                    notifyListener()
                 }
+                notifyListener(force = true)
             }
         }
     }
@@ -164,17 +167,41 @@ class FocusAccessibilityService : AccessibilityService() {
             notifyListener()
         }
 
-        private fun notifyListener() {
+        private fun notifyListener(force: Boolean = false) {
             val listener = keyboardListener ?: return
             val show = shouldShowBubble()
             val top = keyboardTop
-            if (show == lastNotifiedShow && top == lastNotifiedTop) return
+            if (!force && show == lastNotifiedShow && top == lastNotifiedTop) return
             lastNotifiedShow = show
             lastNotifiedTop = top
             listener(show, top)
         }
 
         fun isEnabled(): Boolean = instance != null
+
+        /**
+         * Reports whether Android's live editor connection belongs to another app.
+         * Older Android versions and unavailable/OEM-broken connections are unknown,
+         * so callers can retain their existing keyboard-only fallback.
+         */
+        fun activeEditorStatus(): ActiveEditorStatus {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                return ActiveEditorStatus.UNKNOWN
+            }
+            val svc = instance ?: return ActiveEditorStatus.UNKNOWN
+            return try {
+                val inputMethod = svc.inputMethod ?: return ActiveEditorStatus.UNKNOWN
+                if (!inputMethod.currentInputStarted) return ActiveEditorStatus.INACTIVE
+                val editorPackage = inputMethod.currentInputEditorInfo?.packageName.orEmpty()
+                if (editorPackage.isBlank() || editorPackage == svc.packageName) {
+                    ActiveEditorStatus.INACTIVE
+                } else {
+                    ActiveEditorStatus.ACTIVE
+                }
+            } catch (_: RuntimeException) {
+                ActiveEditorStatus.UNKNOWN
+            }
+        }
 
         /**
          * Inserts text through Android's active editor connection, exactly like an IME.

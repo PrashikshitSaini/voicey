@@ -23,6 +23,7 @@ import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
@@ -57,6 +58,7 @@ class FloatingBubbleService : LifecycleService() {
     private lateinit var bubbleView: FrameLayout
     private lateinit var bubbleLabel: TextView
     private lateinit var bubbleIcon: ImageView
+    private lateinit var bubbleProgress: ProgressBar
     private lateinit var bubbleSpectrum: SpectrumView
     private lateinit var bubbleDiscard: ImageButton
     private lateinit var liveDraftContent: View
@@ -76,6 +78,7 @@ class FloatingBubbleService : LifecycleService() {
     private var isDragging = false
     private var isLongPressing = false
     private val touchSlopPx by lazy { (resources.displayMetrics.density * 8).toInt() }
+    private val compactTouchSlopPx by lazy { (resources.displayMetrics.density * 12).toInt() }
     private val longPressMs = 350L
     private val longPressRunnable = Runnable { startHoldToTalk() }
 
@@ -290,6 +293,7 @@ class FloatingBubbleService : LifecycleService() {
     private fun addBubble() {
         bubbleView = LayoutInflater.from(this).inflate(R.layout.bubble_overlay, null) as FrameLayout
         bubbleIcon = bubbleView.findViewById(R.id.bubble_icon)
+        bubbleProgress = bubbleView.findViewById(R.id.bubble_progress)
         bubbleLabel = bubbleView.findViewById(R.id.bubble_label)
         bubbleSpectrum = bubbleView.findViewById(R.id.bubble_spectrum)
         bubbleDiscard = bubbleView.findViewById(R.id.bubble_discard)
@@ -342,14 +346,17 @@ class FloatingBubbleService : LifecycleService() {
     private fun keyboardAwareActive(): Boolean =
         showOnlyWhileTyping && FocusAccessibilityService.isEnabled()
 
-    /** Called on the main thread by FocusAccessibilityService on every keyboard change. */
+    /** Called on the main thread by FocusAccessibilityService for keyboard/focus changes. */
     private fun onKeyboardStateChanged(shouldShow: Boolean, keyboardTop: Int) {
+        val keyboardChanged = keyboardWantsBubble != shouldShow || lastKeyboardTop != keyboardTop
         keyboardWantsBubble = shouldShow
         lastKeyboardTop = keyboardTop
-        if (shouldShow && keyboardTop != FocusAccessibilityService.NO_KEYBOARD_TOP) {
-            positionAboveKeyboard(keyboardTop)
-        } else if (!shouldShow && compactBubbleEnabled) {
-            reapplyCompactPosition()
+        if (keyboardChanged) {
+            if (shouldShow && keyboardTop != FocusAccessibilityService.NO_KEYBOARD_TOP) {
+                positionAboveKeyboard(keyboardTop)
+            } else if (!shouldShow && compactBubbleEnabled) {
+                reapplyCompactPosition()
+            }
         }
         applyBubbleVisibility()
     }
@@ -381,7 +388,12 @@ class FloatingBubbleService : LifecycleService() {
         if (currentState == Pipeline.State.RECORDING || currentState == Pipeline.State.PROCESSING) {
             return true
         }
-        return keyboardWantsBubble
+        if (!compactBubbleEnabled) return keyboardWantsBubble
+        return keyboardWantsBubble && when (FocusAccessibilityService.activeEditorStatus()) {
+            FocusAccessibilityService.ActiveEditorStatus.ACTIVE,
+            FocusAccessibilityService.ActiveEditorStatus.UNKNOWN -> true
+            FocusAccessibilityService.ActiveEditorStatus.INACTIVE -> false
+        }
     }
 
     private fun applyBubbleVisibility() {
@@ -422,18 +434,27 @@ class FloatingBubbleService : LifecycleService() {
             MotionEvent.ACTION_MOVE -> {
                 val dx = event.rawX - initialTouchX
                 val dy = event.rawY - initialTouchY
-                if (!isDragging && (abs(dx) > touchSlopPx || abs(dy) > touchSlopPx)) {
+                val dragSlop = if (compactBubbleEnabled) compactTouchSlopPx else touchSlopPx
+                if (!isDragging && (abs(dx) > dragSlop || abs(dy) > dragSlop)) {
                     isDragging = true
                     mainHandler.removeCallbacks(longPressRunnable)
                 }
                 if (isDragging) {
-                    layoutParams.x = (initialX + dx).toInt()
-                    layoutParams.y = (initialY + dy).toInt()
+                    layoutParams.x = if (compactBubbleEnabled) {
+                        (initialX + dx).toInt().coerceIn(compactMinX(), compactMaxX())
+                    } else {
+                        (initialX + dx).toInt()
+                    }
+                    layoutParams.y = if (compactBubbleEnabled) {
+                        (initialY + dy).toInt().coerceIn(0, compactMaxY())
+                    } else {
+                        (initialY + dy).toInt()
+                    }
                     windowManager.updateViewLayout(bubbleView, layoutParams)
                 }
                 return true
             }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+            MotionEvent.ACTION_UP -> {
                 mainHandler.removeCallbacks(longPressRunnable)
                 when {
                     isLongPressing -> {
@@ -448,6 +469,14 @@ class FloatingBubbleService : LifecycleService() {
                     isDragging -> Unit
                     else -> toggleRecording()
                 }
+                isDragging = false
+                return true
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                mainHandler.removeCallbacks(longPressRunnable)
+                if (isLongPressing) pipeline.stopAndProcess()
+                if (isDragging && compactBubbleEnabled) snapCompactToEdge()
+                isLongPressing = false
                 isDragging = false
                 return true
             }
@@ -513,17 +542,25 @@ class FloatingBubbleService : LifecycleService() {
                 bubbleLabel.visibility = View.GONE
                 if (state == Pipeline.State.RECORDING) {
                     bubbleIcon.visibility = View.GONE
+                    bubbleProgress.visibility = View.GONE
                     bubbleSpectrum.visibility = View.VISIBLE
                     bubbleSpectrum.startAnimating()
+                } else if (state == Pipeline.State.PROCESSING) {
+                    bubbleIcon.visibility = View.GONE
+                    bubbleSpectrum.stopAnimating()
+                    bubbleSpectrum.visibility = View.GONE
+                    bubbleProgress.visibility = View.VISIBLE
                 } else {
                     hideLiveDraft()
                     bubbleSpectrum.stopAnimating()
                     bubbleSpectrum.visibility = View.GONE
+                    bubbleProgress.visibility = View.GONE
                     bubbleIcon.visibility = View.VISIBLE
                 }
                 val description = getString(compactDescription(state))
                 bubbleView.contentDescription = description
                 bubbleIcon.contentDescription = description
+                bubbleProgress.contentDescription = description
                 if (state != previousState) bubbleView.announceForAccessibility(description)
             } else if (state == Pipeline.State.RECORDING) {
                 bubbleLabel.visibility = View.GONE
@@ -710,6 +747,7 @@ class FloatingBubbleService : LifecycleService() {
         bubbleDiscard.visibility = View.GONE
         bubbleSpectrum.visibility = View.GONE
         bubbleIcon.visibility = View.VISIBLE
+        bubbleProgress.visibility = View.GONE
         bubbleIcon.contentDescription = getString(R.string.compact_bubble_idle)
         bubbleIcon.layoutParams = bubbleIcon.layoutParams.apply {
             width = compactIconSizePx
@@ -732,12 +770,20 @@ class FloatingBubbleService : LifecycleService() {
     private fun compactMaxY(): Int =
         (resources.displayMetrics.heightPixels - compactSizePx).coerceAtLeast(0)
 
+    private fun compactMinX(): Int =
+        (COMPACT_EDGE_INSET_DP * density).toInt().coerceAtMost(compactMaxX())
+
+    private fun compactMaxX(): Int =
+        (resources.displayMetrics.widthPixels - compactSizePx -
+            (COMPACT_EDGE_INSET_DP * density).toInt()).coerceAtLeast(0)
+
     private fun compactX(): Int =
         if (compactBubbleEdgeRight) {
-            (resources.displayMetrics.widthPixels - compactSizePx).coerceAtLeast(0)
-        } else 0
+            compactMaxX()
+        } else compactMinX()
 
-    private fun compactY(): Int = (compactMaxY() * compactBubbleVerticalFraction).toInt()
+    private fun compactY(): Int =
+        (compactMaxY() * compactBubbleVerticalFraction.coerceIn(0f, 1f)).toInt()
 
     private fun reapplyCompactPosition() {
         if (!::layoutParams.isInitialized || !bubbleView.isAttachedToWindow) return
@@ -774,6 +820,7 @@ class FloatingBubbleService : LifecycleService() {
         private const val PILL_WIDTH_DP = 160
         private const val PILL_HEIGHT_DP = 48
         private const val COMPACT_SIZE_DP = 48
+        private const val COMPACT_EDGE_INSET_DP = 8
         private const val COMPACT_ICON_SIZE_DP = 24
         private const val COMPACT_SPECTRUM_WIDTH_DP = 32
         private const val COMPACT_SPECTRUM_HEIGHT_DP = 40

@@ -21,6 +21,14 @@
             android:src="@drawable/ic_mic"
             android:contentDescription="@string/app_name" />
 
+        <ProgressBar
+            android:id="@+id/bubble_progress"
+            style="?android:attr/progressBarStyleSmall"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:indeterminate="true"
+            android:visibility="gone" />
+
         <TextView
             android:id="@+id/bubble_label"
             android:layout_width="0dp"

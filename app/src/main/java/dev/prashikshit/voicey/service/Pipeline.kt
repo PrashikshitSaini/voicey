@@ -201,7 +201,7 @@ class Pipeline(
         liveDraftJob?.cancel()
         liveDraftJob = scope.launch {
             val settings = withContext(Dispatchers.IO) { Settings.load(context) }
-            if (!recorder.isRecording() || !settings.liveDraftPreview ||
+            if (!recorder.isRecording() || settings.compactBubble || !settings.liveDraftPreview ||
                 FocusAccessibilityService.isPasswordFieldFocused()
             ) return@launch
             liveDraftSettings = settings
