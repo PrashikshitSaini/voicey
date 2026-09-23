@@ -60,50 +60,29 @@ class Recorder(private val context: Context) {
         }
         val bufferSize = maxOf(minBuffer * 2, MIN_BUFFER_BYTES)
 
-        val ar = AudioRecord(
-            MediaRecorder.AudioSource.VOICE_RECOGNITION,
-            SAMPLE_RATE,
-            CHANNEL_CONFIG,
-            AUDIO_FORMAT,
-            bufferSize,
-        )
-        if (ar.state != AudioRecord.STATE_INITIALIZED) {
-            ar.release()
-            throw IllegalStateException("AudioRecord failed to initialize")
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val selectedDevice = MicrophoneDevices.findConnectedExternalInput(audioManager, microphoneDeviceId)
+        // A disconnected/invalid saved ID is simply the normal system route. If a live
+        // external route is rejected, retry with a fresh default-routed AudioRecord.
+        val ar = try {
+            createAndStart(bufferSize, selectedDevice)
+        } catch (selectedFailure: Throwable) {
+            if (microphoneDeviceId == 0 || selectedDevice == null) throw selectedFailure
+            createAndStart(bufferSize, null)
         }
 
-        if (microphoneDeviceId != 0) {
-            // Device IDs can become stale when a headset or USB mic is disconnected.
-            // A failed preference is intentionally non-fatal: Android keeps system routing.
-            val device = (context.getSystemService(Context.AUDIO_SERVICE) as AudioManager)
-                .getDevices(AudioManager.GET_DEVICES_INPUTS)
-                .firstOrNull { it.id == microphoneDeviceId && it.isSource }
-            if (device != null) {
+        val out = try {
+            File.createTempFile("voicey-", ".wav", context.cacheDir).also { file ->
+                // Reserve space for the 44-byte WAV header; rewritten in stop().
                 try {
-                    ar.setPreferredDevice(device)
-                } catch (_: RuntimeException) {
-                    // Continue with the default input route.
+                    FileOutputStream(file).use { fos -> fos.write(ByteArray(WAV_HEADER_BYTES)) }
+                } catch (t: Throwable) {
+                    file.delete()
+                    throw t
                 }
-            }
-        }
-
-        val out = File.createTempFile("voicey-", ".wav", context.cacheDir).apply {
-            // Reserve space for the 44-byte WAV header; rewritten in stop().
-            FileOutputStream(this).use { fos -> fos.write(ByteArray(WAV_HEADER_BYTES)) }
-        }
-
-        // Start recording BEFORE touching any of the recorder's state fields, so that
-        // a failure here leaves the recorder in a clean "not started" state and can be
-        // retried. Verifying recordingState catches the case where another app holds
-        // the mic — startRecording() doesn't throw in that case, it just stays STOPPED.
-        try {
-            ar.startRecording()
-            if (ar.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
-                throw IllegalStateException("Microphone busy (another app is using it)")
             }
         } catch (t: Throwable) {
             ar.release()
-            out.delete()
             throw t
         }
 
@@ -133,6 +112,33 @@ class Recorder(private val context: Context) {
                     }
                 }
             }
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun createAndStart(bufferSize: Int, device: AudioDeviceInfo?): AudioRecord {
+        val ar = AudioRecord(
+            MediaRecorder.AudioSource.VOICE_RECOGNITION,
+            SAMPLE_RATE,
+            CHANNEL_CONFIG,
+            AUDIO_FORMAT,
+            bufferSize,
+        )
+        try {
+            if (ar.state != AudioRecord.STATE_INITIALIZED) {
+                throw IllegalStateException("AudioRecord failed to initialize")
+            }
+            if (device != null && !ar.setPreferredDevice(device)) {
+                throw IllegalStateException("Selected microphone was rejected")
+            }
+            ar.startRecording()
+            if (ar.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+                throw IllegalStateException("Microphone busy (another app is using it)")
+            }
+            return ar
+        } catch (t: Throwable) {
+            ar.release()
+            throw t
         }
     }
 

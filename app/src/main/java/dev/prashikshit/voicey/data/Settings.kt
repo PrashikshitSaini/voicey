@@ -35,6 +35,12 @@ data class Settings(
     val liveDraftPreviewDisclosureAccepted: Boolean,
     /** Android AudioDeviceInfo ID, or 0 to use system microphone routing. */
     val microphoneDeviceId: Int = 0,
+    /** Use the fixed icon-only edge-snapping bubble instead of the full pill. */
+    val compactBubble: Boolean = false,
+    /** Last compact-bubble edge; position fields are maintained by the service. */
+    val compactBubbleEdgeRight: Boolean = false,
+    /** Device-independent compact-bubble vertical position, from top (0) to bottom (1). */
+    val compactBubbleVerticalFraction: Float = 0.5f,
 ) {
     fun isReady(): Boolean = apiKey.isNotBlank() && apiBase.isNotBlank()
 
@@ -118,6 +124,10 @@ Output rules:
                     false,
                 ),
                 microphoneDeviceId = store.getString(KEY_MICROPHONE_DEVICE_ID, "0").toIntOrNull() ?: 0,
+                compactBubble = store.getBoolean(KEY_COMPACT_BUBBLE, false),
+                compactBubbleEdgeRight = store.getString(KEY_COMPACT_BUBBLE_EDGE_RIGHT, "false").toBoolean(),
+                compactBubbleVerticalFraction = (store.getString(KEY_COMPACT_BUBBLE_VERTICAL_FRACTION, "0.5")
+                    .toFloatOrNull() ?: 0.5f).coerceIn(0f, 1f),
             )
         }
 
@@ -144,6 +154,10 @@ Output rules:
                 settings.liveDraftPreviewDisclosureAccepted,
             )
             store.putString(KEY_MICROPHONE_DEVICE_ID, settings.microphoneDeviceId.toString())
+            store.putBoolean(KEY_COMPACT_BUBBLE, settings.compactBubble)
+            store.putString(KEY_COMPACT_BUBBLE_EDGE_RIGHT, settings.compactBubbleEdgeRight.toString())
+            store.putString(KEY_COMPACT_BUBBLE_VERTICAL_FRACTION, settings.compactBubbleVerticalFraction
+                .coerceIn(0f, 1f).toString())
         }
 
         private const val KEY_API_BASE = "api_base"
@@ -163,5 +177,8 @@ Output rules:
         private const val KEY_LIVE_DRAFT_PREVIEW_DISCLOSURE_ACCEPTED =
             "live_draft_preview_disclosure_accepted"
         private const val KEY_MICROPHONE_DEVICE_ID = "microphone_device_id"
+        private const val KEY_COMPACT_BUBBLE = "compact_bubble"
+        private const val KEY_COMPACT_BUBBLE_EDGE_RIGHT = "compact_bubble_edge_right"
+        private const val KEY_COMPACT_BUBBLE_VERTICAL_FRACTION = "compact_bubble_vertical_fraction"
     }
 }

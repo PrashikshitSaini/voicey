@@ -14,7 +14,7 @@
 
     <string name="microphone_label">Microphone input</string>
     <string name="microphone_hint">Choose an input</string>
-    <string name="microphone_helper">System default is used if the selected microphone is unavailable.</string>
+    <string name="microphone_helper">System default is recommended. A selected microphone is only a routing preference and may be unavailable.</string>
     <string name="microphone_system_default">System default</string>
 
     <string name="api_provider_label">API endpoint</string>
@@ -38,6 +38,8 @@
 
     <string name="hold_to_talk_label">Hold to talk (release to stop)</string>
     <string name="show_only_while_typing_label">Show pill only while typing</string>
+    <string name="compact_bubble_label">Compact bubble</string>
+    <string name="compact_bubble_helper">Use a 48dp icon-only bubble that snaps to the nearest screen edge.</string>
     <string name="sound_feedback_label">Sound on record start/stop</string>
     <string name="live_draft_preview_label">Live draft preview</string>
     <string name="live_draft_preview_helper">Shows a temporary draft while you speak. Voicey sends extra short transcription requests to your configured provider, which may use more data and API quota. Draft text can change, is never pasted, and is cleared when dictation ends.</string>
@@ -87,6 +89,10 @@
     <string name="pill_tap_to_speak">Tap to speak</string>
     <string name="pill_processing">Polishing…</string>
     <string name="pill_error">Try again</string>
+    <string name="compact_bubble_idle">Voicey: tap to speak</string>
+    <string name="compact_bubble_recording">Voicey: recording, tap to stop</string>
+    <string name="compact_bubble_processing">Voicey: processing</string>
+    <string name="compact_bubble_error">Voicey: error, tap to try again</string>
     <string name="discard_dictation">Discard dictation</string>
     <string name="dictation_discarded">Dictation discarded</string>
     <string name="live_draft_listening">Listening…</string>

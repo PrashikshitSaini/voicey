@@ -5,6 +5,7 @@ import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.net.Uri
@@ -23,6 +24,7 @@ import dev.prashikshit.voicey.data.LanguageCatalog
 import dev.prashikshit.voicey.data.LearnedCorrections
 import dev.prashikshit.voicey.data.Settings
 import dev.prashikshit.voicey.databinding.ActivitySettingsBinding
+import dev.prashikshit.voicey.audio.MicrophoneDevices
 import dev.prashikshit.voicey.service.FloatingBubbleService
 import dev.prashikshit.voicey.service.FocusAccessibilityService
 
@@ -37,6 +39,13 @@ class SettingsActivity : AppCompatActivity() {
     private var liveDraftDisclosurePending = false
     private var microphoneOptions = emptyList<MicrophoneOption>()
     private var selectedMicrophoneDeviceId = 0
+    private val microphoneDeviceCallback = object : AudioDeviceCallback() {
+        override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) =
+            runOnUiThread { refreshMicrophoneDevices() }
+
+        override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) =
+            runOnUiThread { refreshMicrophoneDevices() }
+    }
 
     private val requestRecordAudio = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -77,6 +86,18 @@ class SettingsActivity : AppCompatActivity() {
         refreshDictionarySummary()
     }
 
+    override fun onStart() {
+        super.onStart()
+        getSystemService(AudioManager::class.java)
+            .registerAudioDeviceCallback(microphoneDeviceCallback, null)
+    }
+
+    override fun onStop() {
+        getSystemService(AudioManager::class.java)
+            .unregisterAudioDeviceCallback(microphoneDeviceCallback)
+        super.onStop()
+    }
+
     override fun onPause() {
         super.onPause()
         // The switch is already reverted before a disclosure is shown. Clear the
@@ -101,6 +122,7 @@ class SettingsActivity : AppCompatActivity() {
         switchLearnCorrections.isChecked = settings.learnCorrections
         switchNeverUseClipboard.isChecked = settings.neverUseClipboard
         switchSmartFormatting.isChecked = settings.smartFormatting
+        switchCompactBubble.isChecked = settings.compactBubble
         selectedMicrophoneDeviceId = settings.microphoneDeviceId
     }
 
@@ -131,8 +153,7 @@ class SettingsActivity : AppCompatActivity() {
         val audioManager = getSystemService(AudioManager::class.java)
         microphoneOptions = buildList {
             add(MicrophoneOption(0, getString(R.string.microphone_system_default)))
-            audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS)
-                .filter { it.isSource }
+            MicrophoneDevices.connectedExternalInputs(audioManager)
                 .forEach { device ->
                     add(MicrophoneOption(device.id, microphoneLabel(device)))
                 }
@@ -152,12 +173,12 @@ class SettingsActivity : AppCompatActivity() {
     private fun microphoneLabel(device: AudioDeviceInfo): String {
         val name = device.productName?.toString()?.trim().orEmpty()
         val type = when (device.type) {
-            AudioDeviceInfo.TYPE_BUILTIN_MIC -> "Built-in microphone"
             AudioDeviceInfo.TYPE_WIRED_HEADSET -> "Wired headset"
-            AudioDeviceInfo.TYPE_USB_DEVICE, AudioDeviceInfo.TYPE_USB_HEADSET -> "USB microphone"
+            AudioDeviceInfo.TYPE_USB_DEVICE,
+            AudioDeviceInfo.TYPE_USB_HEADSET,
+            AudioDeviceInfo.TYPE_USB_ACCESSORY -> "USB microphone"
             AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "Bluetooth headset"
-            AudioDeviceInfo.TYPE_LINE_ANALOG, AudioDeviceInfo.TYPE_LINE_DIGITAL -> "Line input"
-            else -> "Input device"
+            else -> "External microphone"
         }
         return if (name.isBlank() || name.equals(type, ignoreCase = true)) type else "$name · $type"
     }
@@ -207,13 +228,13 @@ class SettingsActivity : AppCompatActivity() {
     private fun save() {
         // Custom vocabulary is managed on its dedicated screen. Reload it here so
         // leaving Settings can never overwrite dictionary edits with a stale copy.
-        val vocabulary = Settings.load(this).vocabulary
+        val stored = Settings.load(this)
         val current = Settings(
             apiBase = binding.inputApiBase.text?.toString().orEmpty(),
             apiKey = binding.inputApiKey.text?.toString().orEmpty(),
             transcriptionModel = binding.inputTranscriptionModel.text?.toString().orEmpty(),
             cleanupModel = binding.inputCleanupModel.text?.toString().orEmpty(),
-            vocabulary = vocabulary,
+            vocabulary = stored.vocabulary,
             systemPrompt = binding.inputPrompt.text?.toString().orEmpty()
                 .ifBlank { Settings.DEFAULT_SYSTEM_PROMPT },
             holdToTalk = binding.switchHoldToTalk.isChecked,
@@ -226,9 +247,11 @@ class SettingsActivity : AppCompatActivity() {
             neverUseClipboard = binding.switchNeverUseClipboard.isChecked,
             smartFormatting = binding.switchSmartFormatting.isChecked,
             liveDraftPreview = binding.switchLiveDraftPreview.isChecked,
-            liveDraftPreviewDisclosureAccepted = Settings.load(this)
-                .liveDraftPreviewDisclosureAccepted,
+            liveDraftPreviewDisclosureAccepted = stored.liveDraftPreviewDisclosureAccepted,
             microphoneDeviceId = selectedMicrophoneDeviceId,
+            compactBubble = binding.switchCompactBubble.isChecked,
+            compactBubbleEdgeRight = stored.compactBubbleEdgeRight,
+            compactBubbleVerticalFraction = stored.compactBubbleVerticalFraction,
         )
         Settings.save(this, current)
     }

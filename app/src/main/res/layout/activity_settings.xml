@@ -287,6 +287,22 @@
             android:text="@string/show_only_while_typing_label" />
 
         <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/switch_compact_bubble"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/compact_bubble_label" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:layout_marginTop="2dp"
+            android:layout_marginEnd="4dp"
+            android:text="@string/compact_bubble_helper"
+            android:textAppearance="?attr/textAppearanceBodySmall" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
             android:id="@+id/switch_sound_feedback"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

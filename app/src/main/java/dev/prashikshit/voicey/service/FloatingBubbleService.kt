@@ -6,13 +6,14 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.content.res.Configuration
 import android.graphics.PixelFormat
-import android.text.SpannableStringBuilder
-import android.text.style.ForegroundColorSpan
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.text.SpannableStringBuilder
+import android.text.style.ForegroundColorSpan
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.MotionEvent
@@ -20,6 +21,8 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.ImageButton
+import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
@@ -53,6 +56,7 @@ class FloatingBubbleService : LifecycleService() {
     private lateinit var windowManager: WindowManager
     private lateinit var bubbleView: FrameLayout
     private lateinit var bubbleLabel: TextView
+    private lateinit var bubbleIcon: ImageView
     private lateinit var bubbleSpectrum: SpectrumView
     private lateinit var bubbleDiscard: ImageButton
     private lateinit var liveDraftContent: View
@@ -78,6 +82,10 @@ class FloatingBubbleService : LifecycleService() {
     private val density: Float get() = resources.displayMetrics.density
     private val pillWidthPx: Int get() = (PILL_WIDTH_DP * density).toInt()
     private val pillHeightPx: Int get() = (PILL_HEIGHT_DP * density).toInt()
+    private val compactSizePx: Int get() = (COMPACT_SIZE_DP * density).toInt()
+    private val compactIconSizePx: Int get() = (COMPACT_ICON_SIZE_DP * density).toInt()
+    private val compactSpectrumWidthPx: Int get() = (COMPACT_SPECTRUM_WIDTH_DP * density).toInt()
+    private val compactSpectrumHeightPx: Int get() = (COMPACT_SPECTRUM_HEIGHT_DP * density).toInt()
     private val draftHeightPx: Int get() = (DRAFT_HEIGHT_DP * density).toInt()
     private val draftWidthPx: Int get() = minOf(
         (DRAFT_WIDTH_DP * density).toInt(),
@@ -89,12 +97,16 @@ class FloatingBubbleService : LifecycleService() {
     @Volatile
     private var holdToTalkEnabled: Boolean = true
     private var showOnlyWhileTyping: Boolean = true
+    private var compactBubbleEnabled: Boolean = false
+    private var compactBubbleEdgeRight: Boolean = false
+    private var compactBubbleVerticalFraction: Float = 0.5f
 
     /** Null when the user has disabled sound feedback in settings. */
     private var soundFeedback: SoundFeedback? = null
 
     /** Last keyboard state delivered by the accessibility service. Main thread only. */
     private var keyboardWantsBubble = false
+    private var lastKeyboardTop = FocusAccessibilityService.NO_KEYBOARD_TOP
 
     override fun onCreate() {
         super.onCreate()
@@ -116,6 +128,9 @@ class FloatingBubbleService : LifecycleService() {
         val settings = Settings.load(this)
         holdToTalkEnabled = settings.holdToTalk
         showOnlyWhileTyping = settings.showOnlyWhileTyping
+        compactBubbleEnabled = settings.compactBubble
+        compactBubbleEdgeRight = settings.compactBubbleEdgeRight
+        compactBubbleVerticalFraction = settings.compactBubbleVerticalFraction
         if (settings.soundFeedback) soundFeedback = SoundFeedback(this)
         addBubble()
         CorrectionLearner.setFeedbackListener(::showLearningFeedback)
@@ -131,6 +146,17 @@ class FloatingBubbleService : LifecycleService() {
             return START_NOT_STICKY
         }
         return START_STICKY
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (::bubbleView.isInitialized && compactBubbleEnabled) {
+            if (keyboardWantsBubble && lastKeyboardTop != FocusAccessibilityService.NO_KEYBOARD_TOP) {
+                positionAboveKeyboard(lastKeyboardTop)
+            } else {
+                reapplyCompactPosition()
+            }
+        }
     }
 
     override fun onBind(intent: Intent): IBinder? {
@@ -263,12 +289,14 @@ class FloatingBubbleService : LifecycleService() {
 
     private fun addBubble() {
         bubbleView = LayoutInflater.from(this).inflate(R.layout.bubble_overlay, null) as FrameLayout
+        bubbleIcon = bubbleView.findViewById(R.id.bubble_icon)
         bubbleLabel = bubbleView.findViewById(R.id.bubble_label)
         bubbleSpectrum = bubbleView.findViewById(R.id.bubble_spectrum)
         bubbleDiscard = bubbleView.findViewById(R.id.bubble_discard)
         liveDraftContent = bubbleView.findViewById(R.id.live_draft_content)
         liveDraftStatus = bubbleView.findViewById(R.id.live_draft_status)
         liveDraftText = bubbleView.findViewById(R.id.live_draft_text)
+        if (compactBubbleEnabled) configureCompactLayout()
 
         val overlayType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -281,16 +309,18 @@ class FloatingBubbleService : LifecycleService() {
         // collapses to the icon's size — the old bubble's touch target was 28dp for
         // exactly this reason. Fixed size guarantees the full pill is tappable.
         layoutParams = WindowManager.LayoutParams(
-            pillWidthPx,
-            pillHeightPx,
+            if (compactBubbleEnabled) compactSizePx else pillWidthPx,
+            if (compactBubbleEnabled) compactSizePx else pillHeightPx,
             overlayType,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = (resources.displayMetrics.widthPixels - pillWidthPx) / 2
-            y = resources.displayMetrics.heightPixels - pillHeightPx - (FALLBACK_BOTTOM_MARGIN_DP * density).toInt()
+            x = if (compactBubbleEnabled) compactX() else (resources.displayMetrics.widthPixels - pillWidthPx) / 2
+            y = if (compactBubbleEnabled) compactY() else {
+                resources.displayMetrics.heightPixels - pillHeightPx - (FALLBACK_BOTTOM_MARGIN_DP * density).toInt()
+            }
         }
 
         bubbleDiscard.setOnClickListener(::discardCurrentDictation)
@@ -315,13 +345,28 @@ class FloatingBubbleService : LifecycleService() {
     /** Called on the main thread by FocusAccessibilityService on every keyboard change. */
     private fun onKeyboardStateChanged(shouldShow: Boolean, keyboardTop: Int) {
         keyboardWantsBubble = shouldShow
+        lastKeyboardTop = keyboardTop
         if (shouldShow && keyboardTop != FocusAccessibilityService.NO_KEYBOARD_TOP) {
             positionAboveKeyboard(keyboardTop)
+        } else if (!shouldShow && compactBubbleEnabled) {
+            reapplyCompactPosition()
         }
         applyBubbleVisibility()
     }
 
     private fun positionAboveKeyboard(keyboardTop: Int) {
+        if (compactBubbleEnabled) {
+            layoutParams.x = compactX()
+            layoutParams.y = minOf(
+                compactY(),
+                (keyboardTop - compactSizePx - (PILL_KEYBOARD_MARGIN_DP * density).toInt())
+                    .coerceAtLeast(0),
+            )
+            if (::bubbleView.isInitialized && bubbleView.isAttachedToWindow) {
+                windowManager.updateViewLayout(bubbleView, layoutParams)
+            }
+            return
+        }
         layoutParams.x = (resources.displayMetrics.widthPixels - pillWidthPx) / 2
         layoutParams.y = (keyboardTop - pillHeightPx - (PILL_KEYBOARD_MARGIN_DP * density).toInt())
             .coerceAtLeast(0)
@@ -394,10 +439,12 @@ class FloatingBubbleService : LifecycleService() {
                     isLongPressing -> {
                         // Hold-to-talk: release stops recording.
                         pipeline.stopAndProcess()
+                        if (isDragging && compactBubbleEnabled) snapCompactToEdge()
                         isLongPressing = false
                     }
-                    // Drag end: the pill stays where the user dropped it. It re-anchors
-                    // above the keyboard on the next keyboard-open event.
+                    // The compact control always docks to an edge. The full pill keeps
+                    // its existing free-placement behavior.
+                    isDragging && compactBubbleEnabled -> snapCompactToEdge()
                     isDragging -> Unit
                     else -> toggleRecording()
                 }
@@ -461,7 +508,24 @@ class FloatingBubbleService : LifecycleService() {
             background?.setTint(ContextCompat.getColor(this, colorRes))
             bubbleView.background = background
 
-            if (state == Pipeline.State.RECORDING) {
+            if (compactBubbleEnabled) {
+                bubbleDiscard.visibility = View.GONE
+                bubbleLabel.visibility = View.GONE
+                if (state == Pipeline.State.RECORDING) {
+                    bubbleIcon.visibility = View.GONE
+                    bubbleSpectrum.visibility = View.VISIBLE
+                    bubbleSpectrum.startAnimating()
+                } else {
+                    hideLiveDraft()
+                    bubbleSpectrum.stopAnimating()
+                    bubbleSpectrum.visibility = View.GONE
+                    bubbleIcon.visibility = View.VISIBLE
+                }
+                val description = getString(compactDescription(state))
+                bubbleView.contentDescription = description
+                bubbleIcon.contentDescription = description
+                if (state != previousState) bubbleView.announceForAccessibility(description)
+            } else if (state == Pipeline.State.RECORDING) {
                 bubbleLabel.visibility = View.GONE
                 bubbleSpectrum.visibility = View.VISIBLE
                 bubbleDiscard.visibility = View.VISIBLE
@@ -494,6 +558,7 @@ class FloatingBubbleService : LifecycleService() {
 
     /** Renders an in-memory preview only; it never interacts with the focused editor. */
     private fun renderLiveDraft(draft: Pipeline.LiveDraftUi) {
+        if (compactBubbleEnabled) return
         mainHandler.post {
             if (!::liveDraftContent.isInitialized) return@post
             when (draft.mode) {
@@ -513,7 +578,7 @@ class FloatingBubbleService : LifecycleService() {
     }
 
     private fun showLiveDraft() {
-        if (currentState != Pipeline.State.RECORDING) return
+        if (compactBubbleEnabled || currentState != Pipeline.State.RECORDING) return
         liveDraftContent.visibility = View.VISIBLE
         resizeBubble(expanded = true)
     }
@@ -549,6 +614,7 @@ class FloatingBubbleService : LifecycleService() {
 
     private fun resizeBubble(expanded: Boolean) {
         if (!::bubbleView.isInitialized || !bubbleView.isAttachedToWindow) return
+        if (compactBubbleEnabled) return
         val width = if (expanded) draftWidthPx else pillWidthPx
         val height = if (expanded) draftHeightPx else pillHeightPx
         if (layoutParams.width == width && layoutParams.height == height) return
@@ -638,12 +704,79 @@ class FloatingBubbleService : LifecycleService() {
             WindowManager.LayoutParams.TYPE_PHONE
         }
 
+    private fun configureCompactLayout() {
+        bubbleView.findViewById<LinearLayout>(R.id.pill_content).setPadding(0, 0, 0, 0)
+        bubbleLabel.visibility = View.GONE
+        bubbleDiscard.visibility = View.GONE
+        bubbleSpectrum.visibility = View.GONE
+        bubbleIcon.visibility = View.VISIBLE
+        bubbleIcon.contentDescription = getString(R.string.compact_bubble_idle)
+        bubbleIcon.layoutParams = bubbleIcon.layoutParams.apply {
+            width = compactIconSizePx
+            height = compactIconSizePx
+        }
+        bubbleSpectrum.layoutParams = LinearLayout.LayoutParams(
+            compactSpectrumWidthPx,
+            compactSpectrumHeightPx,
+        )
+        liveDraftContent.visibility = View.GONE
+    }
+
+    private fun compactDescription(state: Pipeline.State): Int = when (state) {
+        Pipeline.State.IDLE -> R.string.compact_bubble_idle
+        Pipeline.State.RECORDING -> R.string.compact_bubble_recording
+        Pipeline.State.PROCESSING -> R.string.compact_bubble_processing
+        Pipeline.State.ERROR -> R.string.compact_bubble_error
+    }
+
+    private fun compactMaxY(): Int =
+        (resources.displayMetrics.heightPixels - compactSizePx).coerceAtLeast(0)
+
+    private fun compactX(): Int =
+        if (compactBubbleEdgeRight) {
+            (resources.displayMetrics.widthPixels - compactSizePx).coerceAtLeast(0)
+        } else 0
+
+    private fun compactY(): Int = (compactMaxY() * compactBubbleVerticalFraction).toInt()
+
+    private fun reapplyCompactPosition() {
+        if (!::layoutParams.isInitialized || !bubbleView.isAttachedToWindow) return
+        layoutParams.width = compactSizePx
+        layoutParams.height = compactSizePx
+        layoutParams.x = compactX()
+        layoutParams.y = compactY()
+        windowManager.updateViewLayout(bubbleView, layoutParams)
+    }
+
+    private fun snapCompactToEdge() {
+        compactBubbleEdgeRight = layoutParams.x + compactSizePx / 2 >= resources.displayMetrics.widthPixels / 2
+        layoutParams.x = compactX()
+        layoutParams.y = layoutParams.y.coerceIn(0, compactMaxY())
+        compactBubbleVerticalFraction = if (compactMaxY() == 0) {
+            0f
+        } else {
+            layoutParams.y.toFloat() / compactMaxY()
+        }
+        windowManager.updateViewLayout(bubbleView, layoutParams)
+        Settings.save(
+            this,
+            Settings.load(this).copy(
+                compactBubbleEdgeRight = compactBubbleEdgeRight,
+                compactBubbleVerticalFraction = compactBubbleVerticalFraction,
+            ),
+        )
+    }
+
     companion object {
         private const val ACTION_STOP = "dev.prashikshit.voicey.STOP_BUBBLE"
         private const val RESTART_REQUEST_CODE = 200
         private const val RESTART_DELAY_MS = 1_000L
         private const val PILL_WIDTH_DP = 160
         private const val PILL_HEIGHT_DP = 48
+        private const val COMPACT_SIZE_DP = 48
+        private const val COMPACT_ICON_SIZE_DP = 24
+        private const val COMPACT_SPECTRUM_WIDTH_DP = 32
+        private const val COMPACT_SPECTRUM_HEIGHT_DP = 40
         private const val DRAFT_WIDTH_DP = 320
         private const val DRAFT_HEIGHT_DP = 92
         private const val TENTATIVE_TEXT_ALPHA = 165
