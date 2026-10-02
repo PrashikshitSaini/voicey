@@ -103,6 +103,8 @@ class FloatingBubbleService : LifecycleService() {
     private var compactBubbleEnabled: Boolean = false
     private var compactBubbleEdgeRight: Boolean = false
     private var compactBubbleVerticalFraction: Float = 0.5f
+    @Volatile
+    private var shuttingDown = false
 
     /** Null when the user has disabled sound feedback in settings. */
     private var soundFeedback: SoundFeedback? = null
@@ -127,6 +129,8 @@ class FloatingBubbleService : LifecycleService() {
             onMessage = ::showTransientMessage,
             onAudioLevel = ::onAudioLevel,
             onLiveDraftChanged = ::renderLiveDraft,
+            onRecordingStarting = ::prepareRecording,
+            onRecordingStopped = ::finishRecording,
         )
         val settings = Settings.load(this)
         holdToTalkEnabled = settings.holdToTalk
@@ -168,13 +172,14 @@ class FloatingBubbleService : LifecycleService() {
     }
 
     override fun onDestroy() {
+        shuttingDown = true
+        pipeline.shutdown()
         CorrectionLearner.setFeedbackListener(null)
         FocusAccessibilityService.setKeyboardListener(null)
         mainHandler.removeCallbacksAndMessages(null)
         removeLearningCard()
         soundFeedback?.release()
         soundFeedback = null
-        pipeline.shutdown()
         if (::bubbleView.isInitialized && bubbleView.isAttachedToWindow) {
             windowManager.removeView(bubbleView)
         }
@@ -348,6 +353,7 @@ class FloatingBubbleService : LifecycleService() {
 
     /** Called on the main thread by FocusAccessibilityService for keyboard/focus changes. */
     private fun onKeyboardStateChanged(shouldShow: Boolean, keyboardTop: Int) {
+        if (shuttingDown) return
         val keyboardChanged = keyboardWantsBubble != shouldShow || lastKeyboardTop != keyboardTop
         keyboardWantsBubble = shouldShow
         lastKeyboardTop = keyboardTop
@@ -511,16 +517,12 @@ class FloatingBubbleService : LifecycleService() {
     private var currentState: Pipeline.State = Pipeline.State.IDLE
 
     private fun renderState(state: Pipeline.State) {
+        if (shuttingDown) return
         val previousState = currentState
         currentState = state
 
-        // Only claim the microphone foreground-service type while we're actually
-        // capturing audio. PROCESSING is HTTP-only and IDLE/ERROR don't touch the mic,
-        // so dropping the claim immediately releases the OS mic-in-use indicator and
-        // lets the platform put the mic radio back to sleep.
-        startInForeground(includeMicrophone = state == Pipeline.State.RECORDING)
-
         mainHandler.post {
+            if (shuttingDown || !::bubbleView.isInitialized || !bubbleView.isAttachedToWindow) return@post
             if (state == Pipeline.State.RECORDING && previousState != Pipeline.State.RECORDING) {
                 soundFeedback?.playStart()
             } else if (state != Pipeline.State.RECORDING && previousState == Pipeline.State.RECORDING) {
@@ -590,14 +592,16 @@ class FloatingBubbleService : LifecycleService() {
 
     /** Forwards the mic level to the spectrum. Called on the recorder's capture thread. */
     private fun onAudioLevel(level: Float) {
-        if (::bubbleSpectrum.isInitialized) bubbleSpectrum.setLevel(level)
+        if (!shuttingDown && ::bubbleSpectrum.isInitialized && bubbleView.isAttachedToWindow) {
+            bubbleSpectrum.setLevel(level)
+        }
     }
 
     /** Renders an in-memory preview only; it never interacts with the focused editor. */
     private fun renderLiveDraft(draft: Pipeline.LiveDraftUi) {
-        if (compactBubbleEnabled) return
+        if (shuttingDown || compactBubbleEnabled) return
         mainHandler.post {
-            if (!::liveDraftContent.isInitialized) return@post
+            if (shuttingDown || !::liveDraftContent.isInitialized || !bubbleView.isAttachedToWindow) return@post
             when (draft.mode) {
                 Pipeline.LiveDraftUi.Mode.OFF -> hideLiveDraft()
                 Pipeline.LiveDraftUi.Mode.LISTENING -> {
@@ -665,15 +669,18 @@ class FloatingBubbleService : LifecycleService() {
     }
 
     private fun showTransientMessage(message: String) {
+        if (shuttingDown) return
         mainHandler.post {
+            if (shuttingDown) return@post
             Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
         }
     }
 
     /** Shows an immediate, undoable receipt whenever the learner stores an edit. */
     private fun showLearningFeedback(corrections: List<Correction>) {
-        if (corrections.isEmpty()) return
+        if (shuttingDown || corrections.isEmpty()) return
         mainHandler.post {
+            if (shuttingDown || !::bubbleView.isInitialized || !bubbleView.isAttachedToWindow) return@post
             removeLearningCard()
             val card = LayoutInflater.from(this).inflate(R.layout.learning_overlay, null)
             val message = card.findViewById<TextView>(R.id.learning_message)
@@ -811,6 +818,31 @@ class FloatingBubbleService : LifecycleService() {
                 compactBubbleVerticalFraction = compactBubbleVerticalFraction,
             ),
         )
+    }
+
+    private fun prepareRecording() {
+        if (shuttingDown) throw IllegalStateException("Service is shutting down")
+        try {
+            startInForeground(includeMicrophone = true)
+        } catch (e: RuntimeException) {
+            // Do not leave the microphone foreground type claimed if promotion fails.
+            try {
+                startInForeground(includeMicrophone = false)
+            } catch (_: RuntimeException) {
+                // The original promotion failure is the actionable error.
+            }
+            throw e
+        }
+    }
+
+    /** Drops the microphone foreground claim only after Recorder's worker has exited. */
+    private fun finishRecording() {
+        if (shuttingDown) return
+        try {
+            startInForeground(includeMicrophone = false)
+        } catch (_: RuntimeException) {
+            showTransientMessage("Foreground service update failed")
+        }
     }
 
     companion object {

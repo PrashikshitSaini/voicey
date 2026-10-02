@@ -14,7 +14,10 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.concurrent.CountDownLatch
 import kotlin.concurrent.thread
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Records 16 kHz / mono / 16-bit PCM audio (Whisper's native rate) and writes it to a WAV
@@ -22,18 +25,17 @@ import kotlin.concurrent.thread
  * appended in real time so memory stays bounded for long recordings.
  *
  * Caller is responsible for holding the RECORD_AUDIO runtime permission before calling [start].
- * Returned [File] from [stop] is owned by the caller — delete it after use.
+ * A completed file from [stop] is owned by the caller — delete it after use.
  */
 class Recorder(private val context: Context) {
 
+    @Volatile
     private var record: AudioRecord? = null
     private var outputFile: File? = null
-    private var pcmBytesWritten: Long = 0L
-    private var captureThread: Thread? = null
-    private val levelNormalizer = AudioLevelNormalizer()
-
     @Volatile
-    private var running: Boolean = false
+    private var captureThread: Thread? = null
+    private var activeSession: CaptureSession? = null
+    private val levelNormalizer = AudioLevelNormalizer()
 
     /**
      * Receives a smoothed 0..1 microphone level roughly every 50 ms while recording.
@@ -49,10 +51,14 @@ class Recorder(private val context: Context) {
     @Volatile
     var audioChunkListener: ((ByteArray, Int) -> Unit)? = null
 
+    /** Called from the capture thread when a read or listener fails. */
+    @Volatile
+    var captureFailureListener: ((Throwable) -> Unit)? = null
+
     @SuppressLint("MissingPermission")
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     fun start(microphoneDeviceId: Int = 0) {
-        check(record == null) { "Recorder already started" }
+        check(record == null && captureThread == null) { "Recorder already started" }
 
         val minBuffer = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT)
         if (minBuffer == AudioRecord.ERROR || minBuffer == AudioRecord.ERROR_BAD_VALUE) {
@@ -66,7 +72,7 @@ class Recorder(private val context: Context) {
         // external route is rejected, retry with a fresh default-routed AudioRecord.
         val ar = try {
             createAndStart(bufferSize, selectedDevice)
-        } catch (selectedFailure: Throwable) {
+        } catch (selectedFailure: Exception) {
             if (microphoneDeviceId == 0 || selectedDevice == null) throw selectedFailure
             createAndStart(bufferSize, null)
         }
@@ -76,41 +82,53 @@ class Recorder(private val context: Context) {
                 // Reserve space for the 44-byte WAV header; rewritten in stop().
                 try {
                     FileOutputStream(file).use { fos -> fos.write(ByteArray(WAV_HEADER_BYTES)) }
-                } catch (t: Throwable) {
+                } catch (e: Exception) {
                     file.delete()
-                    throw t
+                    throw e
                 }
             }
-        } catch (t: Throwable) {
+        } catch (e: Exception) {
             ar.release()
-            throw t
+            throw e
         }
 
         outputFile = out
-        pcmBytesWritten = 0L
         record = ar
-        running = true
         levelNormalizer.reset()
 
+        val session = CaptureSession(ar, out)
+        activeSession = session
         captureThread = thread(name = "voicey-recorder", isDaemon = true) {
-            // Read in ~50 ms chunks (rather than the full internal buffer) so the level
-            // listener gets ~20 updates/sec for a responsive waveform. The AudioRecord's
-            // internal buffer keeps the larger [bufferSize], so no audio is dropped —
-            // this only changes how often we drain it. File content is byte-identical.
-            val buf = ByteArray(LEVEL_CHUNK_BYTES)
-            FileOutputStream(out, true).use { fos ->
-                while (running) {
-                    val read = ar.read(buf, 0, buf.size)
-                    if (read > 0) {
-                        fos.write(buf, 0, read)
-                        pcmBytesWritten += read
-                        publishLevel(buf, read)
-                        audioChunkListener?.invoke(buf, read)
-                    } else if (read < 0) {
-                        // Read error — surface as silent abort; caller observes empty file.
-                        break
+            try {
+                // Read in ~50 ms chunks (rather than the full internal buffer) so the level
+                // listener gets ~20 updates/sec for a responsive waveform. The AudioRecord's
+                // internal buffer keeps the larger [bufferSize], so no audio is dropped — this
+                // only changes how often we drain it. File content is byte-identical.
+                val buf = ByteArray(LEVEL_CHUNK_BYTES)
+                FileOutputStream(session.outputFile, true).use { fos ->
+                    while (session.running) {
+                        val read = session.record.read(buf, 0, buf.size)
+                        if (read > 0) {
+                            fos.write(buf, 0, read)
+                            session.pcmBytesWritten += read
+                            publishLevel(buf, read)
+                            audioChunkListener?.invoke(buf, read)
+                        } else if (read < 0) {
+                            if (session.stopping) break
+                            throw IOException("AudioRecord read failed: $read")
+                        }
                     }
                 }
+            } catch (e: Exception) {
+                session.failure = e
+                session.running = false
+                try {
+                    captureFailureListener?.invoke(e)
+                } catch (_: Exception) {
+                    // A listener must never escape the capture worker.
+                }
+            } finally {
+                session.completion.countDown()
             }
         }
     }
@@ -136,9 +154,9 @@ class Recorder(private val context: Context) {
                 throw IllegalStateException("Microphone busy (another app is using it)")
             }
             return ar
-        } catch (t: Throwable) {
+        } catch (e: Exception) {
             ar.release()
-            throw t
+            throw e
         }
     }
 
@@ -162,31 +180,98 @@ class Recorder(private val context: Context) {
     }
 
     /**
-     * Stops the capture loop, rewrites the WAV header with the final byte counts,
-     * and returns the file. Returns null if [start] was never called.
+     * Requests stop and waits only [timeoutMs] for the owned cleanup task. A timeout leaves this
+     * recorder quarantined; its cleanup task still owns the driver and file until it finishes.
+     * Returns null if [start] was never called.
      */
-    fun stop(): File? {
-        val ar = record ?: return null
-        val out = outputFile ?: return null
-
-        running = false
-        captureThread?.join(STOP_JOIN_TIMEOUT_MS)
-        captureThread = null
-
-        try {
-            ar.stop()
-        } catch (_: IllegalStateException) {
-            // AudioRecord already stopped; ignore.
+    suspend fun stop(timeoutMs: Long = STOP_TIMEOUT_MS): StopOutcome? {
+        val cleanupComplete = synchronized(activeSession ?: return null) {
+            val session = activeSession ?: return null
+            session.stopping = true
+            session.running = false
+            if (!session.cleanupStarted) {
+                session.cleanupStarted = true
+                thread(name = "voicey-recorder-cleanup", isDaemon = true) {
+                    finishCleanup(session)
+                }
+            }
+            session.cleanupComplete
         }
-        ar.release()
-        record = null
 
-        writeWavHeader(out, pcmBytesWritten)
-        outputFile = null
-        return out
+        // Timeout only cancels this wait; the cleanup task and its durable result continue.
+        val result = withTimeoutOrNull(timeoutMs) { cleanupComplete.await() }
+        return StopOutcome(result ?: StopResult.TimedOut(timeoutMs), cleanupComplete)
     }
 
-    fun isRecording(): Boolean = running
+    fun isRecording(): Boolean = record != null
+
+    private fun finishCleanup(session: CaptureSession) {
+        var stopFailure: Exception? = null
+        val result = try {
+            // This task owns stop, worker completion, release, and file finalization. The
+            // caller only waits for a bounded hand-off; it never releases a live driver.
+            try {
+                if (session.record.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
+                    session.record.stop()
+                }
+            } catch (e: Exception) {
+                stopFailure = e
+            }
+            awaitUninterruptibly(session.completion)
+
+            var hardwareReleased = false
+            try {
+                session.record.release()
+                hardwareReleased = true
+                if (stopFailure != null) {
+                    throw RecorderException("Could not stop microphone", stopFailure)
+                }
+                session.failure?.let { throw RecorderException("Recording capture failed", it) }
+                writeWavHeader(session.outputFile, session.pcmBytesWritten)
+                StopResult.Completed(session.outputFile)
+            } catch (e: Exception) {
+                StopResult.Failed(
+                    error = if (e is RecorderException) e else RecorderException("Could not finalize recording", e),
+                    hardwareReleased = hardwareReleased,
+                )
+            }
+        } catch (e: Exception) {
+            StopResult.Failed(
+                RecorderException("Could not clean up microphone", e),
+                hardwareReleased = false,
+            )
+        }
+
+        // A failed release leaves ownership quarantined. There is no safe completion signal
+        // until the driver can actually be released.
+        if (result is StopResult.Failed && !result.hardwareReleased) {
+            try {
+                session.outputFile.delete()
+            } catch (_: Exception) {
+                // A failed hardware release is already quarantined; never strand the worker.
+            }
+            return
+        }
+
+        if (result is StopResult.Failed) {
+            try {
+                session.outputFile.delete()
+            } catch (_: Exception) {
+                // There is no usable file for the pipeline to own after a failed finalization.
+            }
+        }
+        // Clear recorder fields before publishing the durable result. A caller that timed out
+        // still cannot start another capture until this task has reached this point.
+        synchronized(this) {
+            if (activeSession === session) {
+                record = null
+                captureThread = null
+                outputFile = null
+                activeSession = null
+            }
+        }
+        session.cleanupComplete.complete(result)
+    }
 
     private fun writeWavHeader(file: File, pcmDataLength: Long) {
         val totalDataLen = pcmDataLength + WAV_HEADER_BYTES - 8
@@ -206,14 +291,52 @@ class Recorder(private val context: Context) {
             putInt(pcmDataLength.toInt())
         }.array()
 
-        try {
-            java.io.RandomAccessFile(file, "rw").use { raf ->
-                raf.seek(0)
-                raf.write(header)
-            }
-        } catch (e: IOException) {
-            // Header write failed — file may still be playable up to data chunk; leave for caller to handle.
+        java.io.RandomAccessFile(file, "rw").use { raf ->
+            raf.seek(0)
+            raf.write(header)
         }
+    }
+
+    private fun awaitUninterruptibly(latch: CountDownLatch) {
+        var interrupted = false
+        while (true) {
+            try {
+                latch.await()
+                break
+            } catch (_: InterruptedException) {
+                interrupted = true
+            }
+        }
+        if (interrupted) Thread.currentThread().interrupt()
+    }
+
+    private class CaptureSession(
+        val record: AudioRecord,
+        val outputFile: File,
+        @Volatile var running: Boolean = true,
+        @Volatile var stopping: Boolean = false,
+        var pcmBytesWritten: Long = 0L,
+        @Volatile var failure: Throwable? = null,
+        val completion: CountDownLatch = CountDownLatch(1),
+        val cleanupComplete: CompletableDeferred<StopResult> = CompletableDeferred(),
+        var cleanupStarted: Boolean = false,
+    )
+
+    class RecorderException(message: String, cause: Throwable? = null) : IOException(message, cause)
+
+    data class StopOutcome(
+        val result: StopResult,
+        /** Completes only after the worker, driver, file ownership, and recorder fields settle. */
+        val cleanupComplete: CompletableDeferred<StopResult>,
+    )
+
+    sealed class StopResult {
+        data class Completed(val file: File) : StopResult()
+        data class Failed(
+            val error: RecorderException,
+            val hardwareReleased: Boolean,
+        ) : StopResult()
+        data class TimedOut(val timeoutMs: Long) : StopResult()
     }
 
     private companion object {
@@ -224,7 +347,7 @@ class Recorder(private val context: Context) {
         const val BYTES_PER_SAMPLE = 2
         const val WAV_HEADER_BYTES = 44
         const val MIN_BUFFER_BYTES = 8_192
-        const val STOP_JOIN_TIMEOUT_MS = 500L
+        const val STOP_TIMEOUT_MS = 1_000L
 
         /** 50 ms of 16 kHz / 16-bit / mono PCM — the level-update cadence. */
         const val LEVEL_CHUNK_BYTES = 1_600

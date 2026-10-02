@@ -5,13 +5,11 @@ import dev.prashikshit.voicey.data.Settings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
-import java.util.concurrent.TimeUnit
 
 /**
  * Sends the raw transcript plus surrounding-field context + custom vocabulary to an
@@ -25,12 +23,6 @@ class PostProcessor(
     /** Spellings the user has fixed by hand after past dictations — see CorrectionLearner. */
     private val corrections: List<Correction> = emptyList(),
 ) {
-
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
-        .build()
 
     suspend fun clean(rawTranscript: String, context: CleanupContext): String = withContext(Dispatchers.IO) {
         if (rawTranscript.isBlank()) return@withContext ""
@@ -68,21 +60,19 @@ class PostProcessor(
             .build()
 
         try {
-            client.newCall(request).execute().use { response ->
-                val body = response.body?.string().orEmpty()
-                if (!response.isSuccessful) {
-                    throw PostProcessException("HTTP ${response.code}: ${body.take(200)}")
-                }
-                val cleaned = parseFirstChoice(body)
-                when {
-                    cleaned == "EMPTY" -> ""
-                    else -> AppAwareOutputFormatter.format(
-                        text = CleanupOutputGuard.safeText(cleaned, rawTranscript),
-                        packageName = context.app,
-                        fieldHint = context.fieldHint,
-                        enabled = settings.smartFormatting,
-                    )
-                }
+            val response = VoiceyHttp.await(VoiceyHttp.cleanup, request)
+            if (!response.isSuccessful) {
+                throw PostProcessException("HTTP ${response.code}: ${response.body.take(200)}")
+            }
+            val cleaned = parseFirstChoice(response.body)
+            when {
+                cleaned == "EMPTY" -> ""
+                else -> AppAwareOutputFormatter.format(
+                    text = CleanupOutputGuard.safeText(cleaned, rawTranscript),
+                    packageName = context.app,
+                    fieldHint = context.fieldHint,
+                    enabled = settings.smartFormatting,
+                )
             }
         } catch (e: IOException) {
             throw PostProcessException("Network failure: ${e.message ?: e.javaClass.simpleName}", e)

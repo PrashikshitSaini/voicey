@@ -5,7 +5,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -14,7 +13,6 @@ import java.io.File
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import java.util.concurrent.TimeUnit
 
 /**
  * Transcribes a WAV file using an OpenAI-compatible /audio/transcriptions endpoint.
@@ -22,12 +20,6 @@ import java.util.concurrent.TimeUnit
  * and any other provider that mirrors the OpenAI Whisper API surface.
  */
 class WhisperClient(private val settings: Settings) {
-
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .writeTimeout(60, TimeUnit.SECONDS)
-        .build()
 
     /**
      * Returns the raw transcript text, or an empty string if Whisper's response is
@@ -98,7 +90,7 @@ class WhisperClient(private val settings: Settings) {
         return header + pcm
     }
 
-    private fun transcribeBody(
+    private suspend fun transcribeBody(
         filename: String,
         body: okhttp3.RequestBody,
         vocabularyPrompt: String,
@@ -124,13 +116,11 @@ class WhisperClient(private val settings: Settings) {
             .build()
 
         try {
-            client.newCall(request).execute().use { response ->
-                val responseBody = response.body?.string().orEmpty()
-                if (!response.isSuccessful) {
-                    throw TranscriptionException("HTTP ${response.code}: ${responseBody.take(200)}")
-                }
-                return parseAndFilter(responseBody)
+            val response = VoiceyHttp.await(VoiceyHttp.transcription, request)
+            if (!response.isSuccessful) {
+                throw TranscriptionException("HTTP ${response.code}: ${response.body.take(200)}")
             }
+            return parseAndFilter(response.body)
         } catch (e: IOException) {
             throw TranscriptionException("Network failure: ${e.message ?: e.javaClass.simpleName}", e)
         }
