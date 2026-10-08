@@ -811,12 +811,10 @@ class FloatingBubbleService : LifecycleService() {
             layoutParams.y.toFloat() / compactMaxY()
         }
         windowManager.updateViewLayout(bubbleView, layoutParams)
-        Settings.save(
+        Settings.saveCompactPosition(
             this,
-            Settings.load(this).copy(
-                compactBubbleEdgeRight = compactBubbleEdgeRight,
-                compactBubbleVerticalFraction = compactBubbleVerticalFraction,
-            ),
+            compactBubbleEdgeRight,
+            compactBubbleVerticalFraction,
         )
     }
 

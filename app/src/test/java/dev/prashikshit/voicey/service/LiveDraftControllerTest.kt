@@ -1,6 +1,7 @@
 package dev.prashikshit.voicey.service
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -8,6 +9,39 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LiveDraftControllerTest {
+
+    @Test
+    fun rollingSnapshotsMatchTrailingAudioAcrossWrapsAndOversizedChunks() {
+        val controller = LiveDraftController(requestIntervalMs = 0, minAudioBytes = 1, maxAudioBytes = 16)
+        controller.start()
+        var expected = ByteArray(0)
+        val random = java.util.Random(42)
+        repeat(200) {
+            val chunk = ByteArray(1 + random.nextInt(48)).also(random::nextBytes)
+            val length = 1 + random.nextInt(chunk.size)
+            expected = (expected + chunk.copyOf(length)).takeLast(16).toByteArray()
+            val snapshot = controller.offerPcm(chunk, length)!!.audio
+            assertArrayEquals(expected, snapshot)
+            // The recorder reuses its chunk, and requests must own independent snapshots.
+            chunk.fill(0)
+            assertArrayEquals(expected, snapshot)
+            controller.complete("draft")
+        }
+        controller.stop()
+        controller.start()
+        assertArrayEquals(byteArrayOf(9), controller.offerPcm(byteArrayOf(9))!!.audio)
+    }
+
+    @Test
+    fun inFlightSnapshotIsUnchangedWhileRollingBufferOverwritesOldAudio() {
+        val controller = LiveDraftController(requestIntervalMs = 0, minAudioBytes = 1, maxAudioBytes = 4)
+        controller.start()
+        val first = controller.offerPcm(byteArrayOf(1, 2, 3, 4))!!.audio
+        assertNull(controller.offerPcm(byteArrayOf(5, 6, 7, 8)))
+        assertArrayEquals(byteArrayOf(1, 2, 3, 4), first)
+        controller.complete("draft")
+        assertArrayEquals(byteArrayOf(6, 7, 8, 9), controller.offerPcm(byteArrayOf(9))!!.audio)
+    }
 
     @Test
     fun throttlesRequestsAndNeverQueuesASecondRequestWhileOneIsInFlight() {

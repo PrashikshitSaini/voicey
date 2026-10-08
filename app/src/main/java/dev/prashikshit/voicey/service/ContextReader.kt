@@ -30,8 +30,8 @@ object ContextReader {
         }
         val selectionStart = node.textSelectionStart.takeIf { it >= 0 } ?: text.length
         val safeStart = selectionStart.coerceIn(0, text.length)
-        val before = text.substring(0, safeStart).takeLast(MAX_CONTEXT_CHARS)
-        val after = text.substring(safeStart).take(MAX_CONTEXT_CHARS)
+        val before = text.substring((safeStart - MAX_CONTEXT_CHARS).coerceAtLeast(0), safeStart)
+        val after = text.substring(safeStart, safeStart + minOf(MAX_CONTEXT_CHARS, text.length - safeStart))
         return CleanupContext(
             app = packageName.orEmpty(),
             textBefore = before,

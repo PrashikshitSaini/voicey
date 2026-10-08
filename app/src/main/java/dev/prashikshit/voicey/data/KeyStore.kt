@@ -34,6 +34,10 @@ class KeyStore(context: Context) {
         prefs.edit().putBoolean(key, value).apply()
     }
 
+    fun edit(block: SharedPreferences.Editor.() -> Unit) {
+        prefs.edit().apply(block).apply()
+    }
+
     private companion object {
         const val PREFS_NAME = "voicey_secure_prefs"
     }

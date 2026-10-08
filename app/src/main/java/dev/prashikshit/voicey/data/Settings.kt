@@ -160,6 +160,13 @@ Output rules:
                 .coerceIn(0f, 1f).toString())
         }
 
+        fun saveCompactPosition(context: Context, edgeRight: Boolean, verticalFraction: Float) {
+            KeyStore(context).edit {
+                putString(KEY_COMPACT_BUBBLE_EDGE_RIGHT, edgeRight.toString())
+                putString(KEY_COMPACT_BUBBLE_VERTICAL_FRACTION, verticalFraction.coerceIn(0f, 1f).toString())
+            }
+        }
+
         private const val KEY_API_BASE = "api_base"
         private const val KEY_API_KEY = "api_key"
         private const val KEY_TRANSCRIPTION_MODEL = "transcription_model"

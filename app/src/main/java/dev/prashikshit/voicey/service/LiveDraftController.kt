@@ -22,6 +22,8 @@ class LiveDraftController(
     private var inFlight = false
     private var lastRequestAt = Long.MIN_VALUE
     private var rollingAudio = ByteArray(0)
+    private var audioSize = 0
+    private var writeOffset = 0
     private var stableTokens = emptyList<String>()
     private var tentativeTokens = emptyList<String>()
 
@@ -35,14 +37,19 @@ class LiveDraftController(
         if (!active || length <= 0) return null
         appendAudioLocked(chunk, length.coerceAtMost(chunk.size))
         val now = nowMs()
-        if (inFlight || rollingAudio.size < minAudioBytes ||
+        if (inFlight || audioSize < minAudioBytes ||
             (lastRequestAt != Long.MIN_VALUE && now - lastRequestAt < requestIntervalMs)
         ) {
             return null
         }
         inFlight = true
         lastRequestAt = now
-        PreviewRequest(rollingAudio.copyOf())
+        val snapshot = ByteArray(audioSize)
+        val start = if (audioSize == rollingAudio.size) writeOffset else 0
+        val first = minOf(audioSize, rollingAudio.size - start)
+        rollingAudio.copyInto(snapshot, 0, start, start + first)
+        rollingAudio.copyInto(snapshot, first, 0, audioSize - first)
+        PreviewRequest(snapshot)
     }
 
     /** Reconciles overlapping snapshot text without ever persisting it. */
@@ -72,22 +79,26 @@ class LiveDraftController(
 
     fun isActive(): Boolean = synchronized(lock) { active }
 
-    internal fun retainedAudioBytesForTest(): Int = synchronized(lock) { rollingAudio.size }
+    internal fun retainedAudioBytesForTest(): Int = synchronized(lock) { audioSize }
     internal fun retainedDraftForTest(): Draft = synchronized(lock) { currentDraftLocked() }
 
     private fun appendAudioLocked(chunk: ByteArray, length: Int) {
-        val combined = ByteArray(rollingAudio.size + length)
-        rollingAudio.copyInto(combined)
-        chunk.copyInto(combined, destinationOffset = rollingAudio.size, endIndex = length)
-        rollingAudio = if (combined.size <= maxAudioBytes) combined else combined.copyOfRange(
-            combined.size - maxAudioBytes,
-            combined.size,
-        )
+        if (maxAudioBytes == 0) return
+        if (rollingAudio.isEmpty()) rollingAudio = ByteArray(maxAudioBytes)
+        val count = minOf(length, maxAudioBytes)
+        val sourceStart = length - count
+        val first = minOf(count, maxAudioBytes - writeOffset)
+        chunk.copyInto(rollingAudio, writeOffset, sourceStart, sourceStart + first)
+        chunk.copyInto(rollingAudio, 0, sourceStart + first, length)
+        writeOffset = (writeOffset + count) % maxAudioBytes
+        audioSize = minOf(audioSize + count, maxAudioBytes)
     }
 
     private fun clearLocked() {
         rollingAudio.fill(0)
         rollingAudio = ByteArray(0)
+        audioSize = 0
+        writeOffset = 0
         stableTokens = emptyList()
         tentativeTokens = emptyList()
         active = false
