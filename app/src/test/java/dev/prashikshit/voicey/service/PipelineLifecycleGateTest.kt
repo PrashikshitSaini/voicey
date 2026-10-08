@@ -10,11 +10,41 @@ import org.junit.Test
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.runBlocking
 
 class PipelineLifecycleGateTest {
+    @Test
+    fun cancellationDuringIoStopStillTransfersResultAndReleasesOwnership() = runBlocking {
+        val gate = PipelineLifecycleGate()
+        val lease = gate.reserveRecording()!!
+        val stopping = CompletableDeferred<Unit>()
+        val stopped = CompletableDeferred<Unit>()
+        var handedOff = false
+        val job = launchOwnedSession {
+            finishOwnedCleanup {
+                val result = withContext(Dispatchers.IO) {
+                    stopping.complete(Unit)
+                    stopped.await()
+                    "stopped"
+                }
+                assertEquals("stopped", result)
+                handedOff = true
+                gate.release(lease)
+            }
+        }
+        stopping.await()
+        job.cancel()
+        assertFalse(gate.reserveRecording() != null)
+        stopped.complete(Unit)
+        job.join()
+        assertTrue(handedOff)
+        assertNotNull(gate.reserveRecording())
+    }
+
     @Test
     fun rapidStopCannotReserveASecondProcessingJob() {
         val gate = PipelineLifecycleGate()

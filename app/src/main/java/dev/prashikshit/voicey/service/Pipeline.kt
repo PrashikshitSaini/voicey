@@ -190,41 +190,39 @@ class Pipeline(
             val prefix = if (!captureStopped) "Recording failed" else "Unexpected error"
             failIfCurrent(session.generation, "$prefix: ${e.message ?: e.javaClass.simpleName}")
         } finally {
-            // This is also the shutdown path. It is never allowed to be cancelled before the
-            // capture thread has stopped and its file is no longer being written.
-            if (!captureStopped && session.captureStarted) {
-                if (!session.cleanupPending) {
-                    try {
-                        when (val result = stopCapture(session).result) {
-                            is Recorder.StopResult.Completed -> Unit
-                            is Recorder.StopResult.Failed -> Unit
-                            is Recorder.StopResult.TimedOut -> Unit
+            finishOwnedCleanup {
+                // Cancellation must not interrupt the IO-to-main handoff or leave the
+                // ownership gate reserved after file deletion returns from IO.
+                if (!captureStopped && session.captureStarted) {
+                    if (!session.cleanupPending) {
+                        try {
+                            stopCapture(session)
+                        } catch (_: Exception) {
+                            // The recorder owns any driver cleanup that is still pending.
                         }
-                    } catch (_: Exception) {
-                        // The recorder owns any driver cleanup that is still pending.
                     }
                 }
-            }
-            if (!session.cleanupPending && !session.stoppedNotified) {
-                session.stoppedNotified = true
-                notifyRecordingStopped()
-            }
-            stopLiveDraft()
-            session.audioFile?.let { deleteRecording(it, session.generation) }
-            if (isCurrent(session.generation) && state == State.PROCESSING) updateState(State.IDLE)
-            session.runFinished = true
-            if (activeSession === session && !session.cleanupPending) {
-                activeSession = null
-                sessionJob = null
-                lifecycleGate.release(session.lease)
-                if (closed) sessionScope.cancel()
-            } else if (activeSession === session) {
-                sessionJob = null
+                if (!session.cleanupPending && !session.stoppedNotified) {
+                    session.stoppedNotified = true
+                    notifyRecordingStopped()
+                }
+                stopLiveDraft()
+                session.audioFile?.let { deleteRecording(it, session.generation) }
+                if (isCurrent(session.generation) && state == State.PROCESSING) updateState(State.IDLE)
+                session.runFinished = true
+                if (activeSession === session && !session.cleanupPending) {
+                    activeSession = null
+                    sessionJob = null
+                    lifecycleGate.release(session.lease)
+                    if (closed) sessionScope.cancel()
+                } else if (activeSession === session) {
+                    sessionJob = null
+                }
             }
         }
     }
 
-    private suspend fun stopCapture(session: Session): Recorder.StopOutcome {
+    private suspend fun stopCapture(session: Session): Recorder.StopOutcome = finishOwnedCleanup {
         session.cleanupPending = true
         lifecycleGate.markCleanupPending(session.lease)
         val outcome = withContext(NonCancellable + Dispatchers.IO) {
@@ -267,7 +265,7 @@ class Pipeline(
                 }
             }
         }
-        return outcome
+        outcome
     }
 
     private suspend fun deleteRecording(file: File, generation: Long) {
@@ -501,6 +499,10 @@ class Pipeline(
  * try/finally has started. The actual blocking work still immediately hops to IO. */
 internal fun CoroutineScope.launchOwnedSession(block: suspend CoroutineScope.() -> Unit): Job =
     launch(start = CoroutineStart.UNDISPATCHED, block = block)
+
+/** Protect both the IO result and its main-thread ownership handoff from cancellation. */
+internal suspend fun <T> finishOwnedCleanup(block: suspend CoroutineScope.() -> T): T =
+    withContext(NonCancellable, block)
 
 /** Per-session completion handoff; unlike a listener it cannot lose an early completion. */
 internal class PipelineCleanupHandoff<T>(
