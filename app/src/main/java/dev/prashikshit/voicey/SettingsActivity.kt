@@ -159,8 +159,8 @@ class SettingsActivity : AppCompatActivity() {
                 }
         }
 
-        val savedId = Settings.load(this).microphoneDeviceId
-        selectedMicrophoneDeviceId = microphoneOptions.firstOrNull { it.id == savedId }?.id ?: 0
+        // Device callbacks must not replace a selection the user has not saved yet.
+        selectedMicrophoneDeviceId = microphoneOptions.firstOrNull { it.id == selectedMicrophoneDeviceId }?.id ?: 0
         binding.inputMicrophone.setAdapter(
             NoFilterArrayAdapter(this, microphoneOptions.map(MicrophoneOption::label))
         )
@@ -177,7 +177,8 @@ class SettingsActivity : AppCompatActivity() {
             AudioDeviceInfo.TYPE_USB_DEVICE,
             AudioDeviceInfo.TYPE_USB_HEADSET,
             AudioDeviceInfo.TYPE_USB_ACCESSORY -> "USB microphone"
-            AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "Bluetooth headset"
+            AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+            AudioDeviceInfo.TYPE_BLE_HEADSET -> "Bluetooth headset"
             else -> "External microphone"
         }
         return if (name.isBlank() || name.equals(type, ignoreCase = true)) type else "$name · $type"

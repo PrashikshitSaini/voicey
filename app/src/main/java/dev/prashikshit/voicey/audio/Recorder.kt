@@ -68,11 +68,20 @@ class Recorder(private val context: Context) {
 
         val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
         val selectedDevice = MicrophoneDevices.findConnectedExternalInput(audioManager, microphoneDeviceId)
-        // A disconnected/invalid saved ID is simply the normal system route. If a live
-        // external route is rejected, retry with a fresh default-routed AudioRecord.
+        if (microphoneDeviceId != 0 && selectedDevice == null) {
+            throw IOException("Selected microphone disconnected; select it again or choose System default")
+        }
+        val bluetoothRoute = selectedDevice?.takeIf(MicrophoneDevices::isBluetooth)?.let {
+            BluetoothMicrophoneRoute(context).apply { connect(it) }
+        }
+        // Keep wired/USB fallback, but never silently substitute the phone for selected earbuds.
         val ar = try {
-            createAndStart(bufferSize, selectedDevice)
+            createAndStart(bufferSize, selectedDevice, bluetoothRoute != null)
         } catch (selectedFailure: Exception) {
+            if (bluetoothRoute != null) {
+                try { bluetoothRoute.close() } catch (cleanup: Exception) { selectedFailure.addSuppressed(cleanup) }
+                throw selectedFailure
+            }
             if (microphoneDeviceId == 0 || selectedDevice == null) throw selectedFailure
             createAndStart(bufferSize, null)
         }
@@ -88,7 +97,7 @@ class Recorder(private val context: Context) {
                 }
             }
         } catch (e: Exception) {
-            ar.release()
+            try { ar.release() } finally { bluetoothRoute?.close() }
             throw e
         }
 
@@ -96,7 +105,7 @@ class Recorder(private val context: Context) {
         record = ar
         levelNormalizer.reset()
 
-        val session = CaptureSession(ar, out)
+        val session = CaptureSession(ar, out, bluetoothRoute)
         activeSession = session
         captureThread = thread(name = "voicey-recorder", isDaemon = true) {
             try {
@@ -105,10 +114,18 @@ class Recorder(private val context: Context) {
                 // internal buffer keeps the larger [bufferSize], so no audio is dropped — this
                 // only changes how often we drain it. File content is byte-identical.
                 val buf = ByteArray(LEVEL_CHUNK_BYTES)
+                var routeVerified = bluetoothRoute == null
                 FileOutputStream(session.outputFile, true).use { fos ->
                     while (session.running) {
                         val read = session.record.read(buf, 0, buf.size)
                         if (read > 0) {
+                            if (!routeVerified) {
+                                val routed = session.record.routedDevice
+                                if (routed == null || !MicrophoneDevices.isBluetooth(routed)) {
+                                    throw IOException("Android did not route recording to the earbuds microphone; reconnect and retry")
+                                }
+                                routeVerified = true
+                            }
                             fos.write(buf, 0, read)
                             session.pcmBytesWritten += read
                             publishLevel(buf, read)
@@ -134,9 +151,9 @@ class Recorder(private val context: Context) {
     }
 
     @SuppressLint("MissingPermission")
-    private fun createAndStart(bufferSize: Int, device: AudioDeviceInfo?): AudioRecord {
+    private fun createAndStart(bufferSize: Int, device: AudioDeviceInfo?, bluetooth: Boolean = false): AudioRecord {
         val ar = AudioRecord(
-            MediaRecorder.AudioSource.VOICE_RECOGNITION,
+            if (bluetooth) MediaRecorder.AudioSource.VOICE_COMMUNICATION else MediaRecorder.AudioSource.VOICE_RECOGNITION,
             SAMPLE_RATE,
             CHANNEL_CONFIG,
             AUDIO_FORMAT,
@@ -146,7 +163,7 @@ class Recorder(private val context: Context) {
             if (ar.state != AudioRecord.STATE_INITIALIZED) {
                 throw IllegalStateException("AudioRecord failed to initialize")
             }
-            if (device != null && !ar.setPreferredDevice(device)) {
+            if (!bluetooth && device != null && !ar.setPreferredDevice(device)) {
                 throw IllegalStateException("Selected microphone was rejected")
             }
             ar.startRecording()
@@ -223,6 +240,7 @@ class Recorder(private val context: Context) {
             try {
                 session.record.release()
                 hardwareReleased = true
+                session.bluetoothRoute?.close()
                 if (stopFailure != null) {
                     throw RecorderException("Could not stop microphone", stopFailure)
                 }
@@ -313,6 +331,7 @@ class Recorder(private val context: Context) {
     private class CaptureSession(
         val record: AudioRecord,
         val outputFile: File,
+        val bluetoothRoute: BluetoothMicrophoneRoute?,
         @Volatile var running: Boolean = true,
         @Volatile var stopping: Boolean = false,
         var pcmBytesWritten: Long = 0L,
