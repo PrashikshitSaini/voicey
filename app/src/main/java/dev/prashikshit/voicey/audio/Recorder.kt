@@ -72,11 +72,14 @@ class Recorder(private val context: Context) {
             throw IOException("Selected microphone disconnected; select it again or choose System default")
         }
         val bluetoothRoute = selectedDevice?.takeIf(MicrophoneDevices::isBluetooth)?.let {
-            BluetoothMicrophoneRoute(context).apply { connect(it) }
+            BluetoothMicrophoneRoute(context)
         }
+        val captureDevice = if (bluetoothRoute != null && selectedDevice != null) {
+            bluetoothRoute.connect(selectedDevice)
+        } else selectedDevice
         // Keep wired/USB fallback, but never silently substitute the phone for selected earbuds.
         val ar = try {
-            createAndStart(bufferSize, selectedDevice, bluetoothRoute != null)
+            createAndStart(bufferSize, captureDevice)
         } catch (selectedFailure: Exception) {
             if (bluetoothRoute != null) {
                 try { bluetoothRoute.close() } catch (cleanup: Exception) { selectedFailure.addSuppressed(cleanup) }
@@ -121,7 +124,7 @@ class Recorder(private val context: Context) {
                         if (read > 0) {
                             if (!routeVerified) {
                                 val routed = session.record.routedDevice
-                                if (routed == null || !MicrophoneDevices.isBluetooth(routed)) {
+                                if (routed == null || routed.id != captureDevice?.id) {
                                     throw IOException("Android did not route recording to the earbuds microphone; reconnect and retry")
                                 }
                                 routeVerified = true
@@ -151,9 +154,11 @@ class Recorder(private val context: Context) {
     }
 
     @SuppressLint("MissingPermission")
-    private fun createAndStart(bufferSize: Int, device: AudioDeviceInfo?, bluetooth: Boolean = false): AudioRecord {
+    private fun createAndStart(bufferSize: Int, device: AudioDeviceInfo?): AudioRecord {
         val ar = AudioRecord(
-            if (bluetooth) MediaRecorder.AudioSource.VOICE_COMMUNICATION else MediaRecorder.AudioSource.VOICE_RECOGNITION,
+            // Dictation needs recognition capture even when a Bluetooth communication route
+            // is active. VOICE_COMMUNICATION requests additional vendor call preprocessing.
+            MediaRecorder.AudioSource.VOICE_RECOGNITION,
             SAMPLE_RATE,
             CHANNEL_CONFIG,
             AUDIO_FORMAT,
@@ -163,7 +168,7 @@ class Recorder(private val context: Context) {
             if (ar.state != AudioRecord.STATE_INITIALIZED) {
                 throw IllegalStateException("AudioRecord failed to initialize")
             }
-            if (!bluetooth && device != null && !ar.setPreferredDevice(device)) {
+            if (device != null && !ar.setPreferredDevice(device)) {
                 throw IllegalStateException("Selected microphone was rejected")
             }
             ar.startRecording()

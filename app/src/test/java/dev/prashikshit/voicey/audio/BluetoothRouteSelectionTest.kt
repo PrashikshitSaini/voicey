@@ -5,6 +5,16 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class BluetoothRouteSelectionTest {
+    @Test fun resolvesCommunicationOutputToItsMatchingRecordingInput() {
+        val output = BluetoothEndpoint(10, 26, "buds")
+        assertEquals(11, selectBluetoothEndpoint(output, listOf(
+            BluetoothEndpoint(1, 15, ""), // phone mic
+            BluetoothEndpoint(11, 26, "buds"),
+            BluetoothEndpoint(12, 26, "other"),
+        )))
+        assertNull(selectBluetoothEndpoint(output, listOf(BluetoothEndpoint(1, 15, ""))))
+    }
+
     @Test fun matchesOutputPortToSavedInputByAddress() {
         val selected = BluetoothEndpoint(1, 7, "buds")
         assertEquals(2, selectBluetoothEndpoint(selected, listOf(

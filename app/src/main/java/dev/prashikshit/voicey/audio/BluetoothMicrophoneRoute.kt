@@ -18,7 +18,7 @@ internal class BluetoothMicrophoneRoute(private val context: Context) : AutoClos
     private var requested = false
 
     @Suppress("DEPRECATION")
-    fun connect(selected: AudioDeviceInfo) {
+    fun connect(selected: AudioDeviceInfo): AudioDeviceInfo {
         try {
             if (manager.mode != AudioManager.MODE_NORMAL) {
                 throw IOException("Microphone is in use by a call or another app")
@@ -26,6 +26,7 @@ internal class BluetoothMicrophoneRoute(private val context: Context) : AutoClos
             previousMode = manager.mode
             manager.mode = AudioManager.MODE_IN_COMMUNICATION
             val ready = CountDownLatch(1)
+            var endpoint = selected
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 val candidates = manager.availableCommunicationDevices
                 val targetId = selectBluetoothEndpoint(
@@ -34,6 +35,7 @@ internal class BluetoothMicrophoneRoute(private val context: Context) : AutoClos
                 )
                 val target = candidates.firstOrNull { it.id == targetId }
                     ?: throw IOException("Selected earbuds are unavailable; reconnect and select them again")
+                endpoint = target
                 val listener = AudioManager.OnCommunicationDeviceChangedListener {
                     if (it?.id == target.id) ready.countDown()
                 }
@@ -67,6 +69,15 @@ internal class BluetoothMicrophoneRoute(private val context: Context) : AutoClos
                     context.unregisterReceiver(receiver)
                 }
             }
+            // Routing selects a communication *output*. Resolve its matching source after
+            // connection, so speech-recognition capture can explicitly prefer the buds' mic.
+            val inputs = manager.getDevices(AudioManager.GET_DEVICES_INPUTS).toList()
+            val inputId = selectBluetoothEndpoint(
+                BluetoothEndpoint(endpoint.id, endpoint.type, endpoint.address),
+                inputs.map { BluetoothEndpoint(it.id, it.type, it.address) },
+            )
+            return inputs.firstOrNull { it.id == inputId }
+                ?: throw IOException("Earbuds connected but their microphone is unavailable; reconnect and retry")
         } catch (e: Exception) {
             try { close() } catch (cleanup: Exception) { e.addSuppressed(cleanup) }
             throw e
