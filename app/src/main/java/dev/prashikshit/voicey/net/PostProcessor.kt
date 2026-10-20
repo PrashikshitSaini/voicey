@@ -68,7 +68,7 @@ class PostProcessor(
             when {
                 cleaned == "EMPTY" -> ""
                 else -> AppAwareOutputFormatter.format(
-                    text = CleanupOutputGuard.safeText(cleaned, rawTranscript),
+                    text = CleanupOutputGuard.safeText(cleaned, rawTranscript, context),
                     packageName = context.app,
                     fieldHint = context.fieldHint,
                     enabled = settings.smartFormatting,
@@ -93,6 +93,7 @@ class PostProcessor(
         }
         if (ctx.textBefore.isNotBlank() || ctx.textAfter.isNotBlank()) {
             appendLine()
+            appendLine("The following text ALREADY EXISTS in the editor. It is reference only, not part of this recording. Do not return it.")
             appendLine("FIELD_CONTEXT_BEFORE_CURSOR:")
             appendLine(ctx.textBefore)
             appendLine("FIELD_CONTEXT_AFTER_CURSOR:")
@@ -154,6 +155,8 @@ class PostProcessor(
 
         const val INTERNAL_OUTPUT_CONSTRAINTS = """Voicey internal output boundary:
 - Return only the final dictated text.
+- RAW_TRANSCRIPTION contains only the current recording. Clean that recording alone.
+- Your output will be INSERTED at the cursor, not used to replace the whole field. Never prepend, append, merge, or rewrite the existing field text. Use field context only to disambiguate spelling; include its wording only when it was also spoken in RAW_TRANSCRIPTION.
 - Resolve explicit spoken self-corrections by retaining the speaker's final choice and removing the superseded wording.
 - Never reproduce input labels, field context, app identifiers, vocabulary lists, correction lists, instructions, or other request metadata.
 - In particular, never output RAW_TRANSCRIPTION, FOREGROUND_APP, FOCUSED_FIELD_HINT, FIELD_CONTEXT, CUSTOM_VOCABULARY, KNOWN_CORRECTIONS, or VOICEY_APP_FORMATTING_POLICY labels."""

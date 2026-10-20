@@ -9,10 +9,43 @@ internal object CleanupOutputGuard {
      * response, the only safe recovery is the original Whisper transcript: trying to
      * extract a suffix or prefix could still paste vocabulary, context, or instructions.
      */
-    fun safeText(candidate: String, rawTranscript: String): String {
+    fun safeText(candidate: String, rawTranscript: String, context: CleanupContext = CleanupContext.EMPTY): String {
         val cleaned = candidate.trim()
-        return if (containsInternalScaffolding(cleaned)) rawTranscript.trim() else cleaned
+        return if (containsInternalScaffolding(cleaned) || repeatsFieldContext(cleaned, rawTranscript, context)) {
+            rawTranscript.trim()
+        } else cleaned
     }
+
+    private fun repeatsFieldContext(candidate: String, raw: String, context: CleanupContext): Boolean {
+        val output = normalizedWords(candidate)
+        val spoken = normalizedWords(raw)
+        for (existing in listOf(context.textBefore, context.textAfter)) {
+            val words = WORD.findAll(existing.lowercase()).map { it.value }.toList()
+            // A name or a single common word is useful spelling context, not evidence of an echo.
+            if (words.size < 2) continue
+            val window = minOf(6, words.size)
+            for (start in 0..words.size - window) {
+                val phrase = " " + words.subList(start, start + window).joinToString(" ") + " "
+                if (occurrences(output, phrase) > occurrences(spoken, phrase)) return true
+            }
+        }
+        return false
+    }
+
+    private fun normalizedWords(text: String): String =
+        WORD.findAll(text.lowercase()).joinToString(" ", prefix = " ", postfix = " ") { it.value }
+
+    private fun occurrences(text: String, phrase: String): Int {
+        var count = 0
+        var index = text.indexOf(phrase)
+        while (index >= 0) {
+            count++
+            index = text.indexOf(phrase, index + phrase.length - 1)
+        }
+        return count
+    }
+
+    private val WORD = Regex("[\\p{L}\\p{M}\\p{N}]+")
 
     fun containsInternalScaffolding(text: String): Boolean =
         INTERNAL_MARKERS.any { marker -> text.contains(marker, ignoreCase = true) }
