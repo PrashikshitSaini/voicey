@@ -119,7 +119,13 @@ class FloatingBubbleService : LifecycleService() {
         // so the system's mic-in-use indicator (green dot, "App is using your microphone"
         // banner) is not shown while the bubble is idle, and the OS doesn't keep the
         // mic radio warm — better for both privacy UX and battery.
-        startInForeground(includeMicrophone = false)
+        try {
+            startInForeground(includeMicrophone = false)
+        } catch (_: RuntimeException) {
+            // START_STICKY / alarm restarts from background are rejected on Android 12+.
+            stopSelf()
+            return
+        }
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         injector = TextInjector(this)
         pipeline = Pipeline(
@@ -132,14 +138,18 @@ class FloatingBubbleService : LifecycleService() {
             onRecordingStarting = ::prepareRecording,
             onRecordingStopped = ::finishRecording,
         )
-        val settings = Settings.load(this)
-        holdToTalkEnabled = settings.holdToTalk
-        showOnlyWhileTyping = settings.showOnlyWhileTyping
-        compactBubbleEnabled = settings.compactBubble
-        compactBubbleEdgeRight = settings.compactBubbleEdgeRight
-        compactBubbleVerticalFraction = settings.compactBubbleVerticalFraction
-        if (settings.soundFeedback) soundFeedback = SoundFeedback(this)
-        addBubble()
+        val settings = try {
+            Settings.load(this)
+        } catch (_: Exception) {
+            null
+        }
+        holdToTalkEnabled = settings?.holdToTalk ?: true
+        showOnlyWhileTyping = settings?.showOnlyWhileTyping ?: true
+        compactBubbleEnabled = settings?.compactBubble ?: false
+        compactBubbleEdgeRight = settings?.compactBubbleEdgeRight ?: false
+        compactBubbleVerticalFraction = settings?.compactBubbleVerticalFraction ?: 0.5f
+        if (settings?.soundFeedback ?: true) soundFeedback = SoundFeedback(this)
+        if (!addBubble()) return
         CorrectionLearner.setFeedbackListener(::showLearningFeedback)
         // Delivers the current keyboard state immediately, so the pill starts hidden
         // when no keyboard is open (and positioned correctly when one already is).
@@ -173,15 +183,21 @@ class FloatingBubbleService : LifecycleService() {
 
     override fun onDestroy() {
         shuttingDown = true
-        pipeline.shutdown()
+        if (::pipeline.isInitialized) pipeline.shutdown()
         CorrectionLearner.setFeedbackListener(null)
         FocusAccessibilityService.setKeyboardListener(null)
         mainHandler.removeCallbacksAndMessages(null)
         removeLearningCard()
         soundFeedback?.release()
         soundFeedback = null
-        if (::bubbleView.isInitialized && bubbleView.isAttachedToWindow) {
-            windowManager.removeView(bubbleView)
+        if (::bubbleView.isInitialized && ::windowManager.isInitialized &&
+            bubbleView.isAttachedToWindow
+        ) {
+            try {
+                windowManager.removeView(bubbleView)
+            } catch (_: IllegalArgumentException) {
+                // Window was already removed while the service was shutting down.
+            }
         }
         super.onDestroy()
     }
@@ -219,11 +235,19 @@ class FloatingBubbleService : LifecycleService() {
         val canExact = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
             alarmManager.canScheduleExactAlarms()
         if (canExact) {
-            alarmManager.setExactAndAllowWhileIdle(
-                AlarmManager.RTC_WAKEUP,
-                fireAt,
-                pendingIntent,
-            )
+            try {
+                alarmManager.setExactAndAllowWhileIdle(
+                    AlarmManager.RTC_WAKEUP,
+                    fireAt,
+                    pendingIntent,
+                )
+            } catch (_: SecurityException) {
+                alarmManager.setAndAllowWhileIdle(
+                    AlarmManager.RTC_WAKEUP,
+                    fireAt,
+                    pendingIntent,
+                )
+            }
         } else {
             alarmManager.setAndAllowWhileIdle(
                 AlarmManager.RTC_WAKEUP,
@@ -295,7 +319,7 @@ class FloatingBubbleService : LifecycleService() {
             .build()
     }
 
-    private fun addBubble() {
+    private fun addBubble(): Boolean {
         bubbleView = LayoutInflater.from(this).inflate(R.layout.bubble_overlay, null) as FrameLayout
         bubbleIcon = bubbleView.findViewById(R.id.bubble_icon)
         bubbleProgress = bubbleView.findViewById(R.id.bubble_progress)
@@ -340,7 +364,19 @@ class FloatingBubbleService : LifecycleService() {
             bubbleView.visibility = View.GONE
             bubbleView.alpha = 0f
         }
-        windowManager.addView(bubbleView, layoutParams)
+        try {
+            windowManager.addView(bubbleView, layoutParams)
+        } catch (_: RuntimeException) {
+            // "Display over other apps" was revoked while the service was alive.
+            Toast.makeText(
+                this,
+                "Voicey needs “Display over other apps” permission",
+                Toast.LENGTH_LONG,
+            ).show()
+            stopSelf()
+            return false
+        }
+        return true
     }
 
     /**
@@ -375,16 +411,21 @@ class FloatingBubbleService : LifecycleService() {
                 (keyboardTop - compactSizePx - (PILL_KEYBOARD_MARGIN_DP * density).toInt())
                     .coerceAtLeast(0),
             )
-            if (::bubbleView.isInitialized && bubbleView.isAttachedToWindow) {
-                windowManager.updateViewLayout(bubbleView, layoutParams)
-            }
+            updateBubbleLayout()
             return
         }
         layoutParams.x = (resources.displayMetrics.widthPixels - pillWidthPx) / 2
         layoutParams.y = (keyboardTop - pillHeightPx - (PILL_KEYBOARD_MARGIN_DP * density).toInt())
             .coerceAtLeast(0)
-        if (::bubbleView.isInitialized && bubbleView.isAttachedToWindow) {
+        updateBubbleLayout()
+    }
+
+    private fun updateBubbleLayout() {
+        if (!::bubbleView.isInitialized || !bubbleView.isAttachedToWindow) return
+        try {
             windowManager.updateViewLayout(bubbleView, layoutParams)
+        } catch (_: IllegalArgumentException) {
+            // Window was detached between the check and the update.
         }
     }
 
@@ -456,7 +497,7 @@ class FloatingBubbleService : LifecycleService() {
                     } else {
                         (initialY + dy).toInt()
                     }
-                    windowManager.updateViewLayout(bubbleView, layoutParams)
+                    updateBubbleLayout()
                 }
                 return true
             }
@@ -665,7 +706,7 @@ class FloatingBubbleService : LifecycleService() {
         layoutParams.x = (resources.displayMetrics.widthPixels - width) / 2
         // Preserve the bottom edge when the keyboard position is temporarily unknown.
         layoutParams.y = (layoutParams.y - (height - oldHeight)).coerceAtLeast(0)
-        windowManager.updateViewLayout(bubbleView, layoutParams)
+        updateBubbleLayout()
     }
 
     private fun showTransientMessage(message: String) {
@@ -798,7 +839,7 @@ class FloatingBubbleService : LifecycleService() {
         layoutParams.height = compactSizePx
         layoutParams.x = compactX()
         layoutParams.y = compactY()
-        windowManager.updateViewLayout(bubbleView, layoutParams)
+        updateBubbleLayout()
     }
 
     private fun snapCompactToEdge() {
@@ -810,12 +851,16 @@ class FloatingBubbleService : LifecycleService() {
         } else {
             layoutParams.y.toFloat() / compactMaxY()
         }
-        windowManager.updateViewLayout(bubbleView, layoutParams)
-        Settings.saveCompactPosition(
-            this,
-            compactBubbleEdgeRight,
-            compactBubbleVerticalFraction,
-        )
+        updateBubbleLayout()
+        try {
+            Settings.saveCompactPosition(
+                this,
+                compactBubbleEdgeRight,
+                compactBubbleVerticalFraction,
+            )
+        } catch (_: Exception) {
+            // Position persistence is best-effort; the bubble is already docked.
+        }
     }
 
     private fun prepareRecording() {

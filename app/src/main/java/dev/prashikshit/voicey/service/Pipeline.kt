@@ -48,6 +48,7 @@ class Pipeline(
         levelListener = onAudioLevel
         audioChunkListener = ::onAudioChunk
         captureFailureListener = ::onRecorderFailure
+        noticeListener = onMessage
     }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     // Separate ownership scope: service shutdown cancels UI/network work but never strands
@@ -135,7 +136,7 @@ class Pipeline(
             withContext(NonCancellable + Dispatchers.IO) {
                 val settings = Settings.load(context)
                 if (session.cancelRequested) return@withContext
-                recorder.start(settings.microphoneDeviceId)
+                recorder.start(settings.microphoneSelection)
                 session.captureStarted = true
             }
             if (!session.captureStarted) return
@@ -304,14 +305,16 @@ class Pipeline(
             return
         }
 
-        val focusedNode = FocusAccessibilityService.findFocusedEditable()
-        val nodePackage = focusedNode?.packageName?.toString().orEmpty()
         val editorPackage = FocusAccessibilityService.currentEditorPackageName()
-        val targetPackage = editorPackage
-            .takeIf { it.isNotBlank() }
-            ?: nodePackage.takeIf { it.isNotBlank() && it != context.packageName }
-            ?: FocusAccessibilityService.currentPackageName()
-        val ctx = ContextReader.read(focusedNode, targetPackage)
+        val (focusedNode, targetPackage, ctx) = withContext(Dispatchers.Default) {
+            val node = FocusAccessibilityService.findFocusedEditable()
+            val nodePackage = node?.packageName?.toString().orEmpty()
+            val target = editorPackage
+                .takeIf { it.isNotBlank() }
+                ?: nodePackage.takeIf { it.isNotBlank() && it != context.packageName }
+                ?: FocusAccessibilityService.currentPackageName()
+            Triple(node, target, ContextReader.read(node, target))
+        }
         val cleaned = PostProcessor(settings, corrections).clean(raw, ctx)
         val toInsert = cleaned.ifBlank { raw }
 

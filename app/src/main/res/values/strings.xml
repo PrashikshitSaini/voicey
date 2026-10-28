@@ -14,8 +14,10 @@
 
     <string name="microphone_label">Microphone input</string>
     <string name="microphone_hint">Choose an input</string>
-    <string name="microphone_helper">System default is recommended. A selected microphone is only a routing preference and may be unavailable.</string>
-    <string name="microphone_system_default">System default</string>
+    <string name="microphone_helper">Automatic uses your headset mic whenever one is connected, otherwise the phone mic.</string>
+    <string name="microphone_automatic">Automatic (headset when connected)</string>
+    <string name="microphone_phone">Phone microphone</string>
+    <string name="microphone_saved_disconnected">Saved headset (not connected)</string>
 
     <string name="api_provider_label">API endpoint</string>
     <string name="api_provider_hint">https://api.groq.com/openai/v1</string>

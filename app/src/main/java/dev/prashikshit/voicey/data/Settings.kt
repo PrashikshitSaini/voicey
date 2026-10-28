@@ -33,8 +33,8 @@ data class Settings(
     val liveDraftPreview: Boolean,
     /** Whether the extra-request disclosure was acknowledged at least once. */
     val liveDraftPreviewDisclosureAccepted: Boolean,
-    /** Android AudioDeviceInfo ID, or 0 to use system microphone routing. */
-    val microphoneDeviceId: Int = 0,
+    /** "auto", "phone", or a stable device key (see MicrophoneDevices.stableKey). */
+    val microphoneSelection: String = "auto",
     /** Use the fixed icon-only edge-snapping bubble instead of the full pill. */
     val compactBubble: Boolean = false,
     /** Last compact-bubble edge; position fields are maintained by the service. */
@@ -123,7 +123,7 @@ Output rules:
                     KEY_LIVE_DRAFT_PREVIEW_DISCLOSURE_ACCEPTED,
                     false,
                 ),
-                microphoneDeviceId = store.getString(KEY_MICROPHONE_DEVICE_ID, "0").toIntOrNull() ?: 0,
+                microphoneSelection = store.getString(KEY_MICROPHONE_SELECTION, "auto"),
                 compactBubble = store.getBoolean(KEY_COMPACT_BUBBLE, false),
                 compactBubbleEdgeRight = store.getString(KEY_COMPACT_BUBBLE_EDGE_RIGHT, "false").toBoolean(),
                 compactBubbleVerticalFraction = (store.getString(KEY_COMPACT_BUBBLE_VERTICAL_FRACTION, "0.5")
@@ -153,7 +153,7 @@ Output rules:
                 KEY_LIVE_DRAFT_PREVIEW_DISCLOSURE_ACCEPTED,
                 settings.liveDraftPreviewDisclosureAccepted,
             )
-            store.putString(KEY_MICROPHONE_DEVICE_ID, settings.microphoneDeviceId.toString())
+            store.putString(KEY_MICROPHONE_SELECTION, settings.microphoneSelection)
             store.putBoolean(KEY_COMPACT_BUBBLE, settings.compactBubble)
             store.putString(KEY_COMPACT_BUBBLE_EDGE_RIGHT, settings.compactBubbleEdgeRight.toString())
             store.putString(KEY_COMPACT_BUBBLE_VERTICAL_FRACTION, settings.compactBubbleVerticalFraction
@@ -183,7 +183,7 @@ Output rules:
         private const val KEY_LIVE_DRAFT_PREVIEW = "live_draft_preview"
         private const val KEY_LIVE_DRAFT_PREVIEW_DISCLOSURE_ACCEPTED =
             "live_draft_preview_disclosure_accepted"
-        private const val KEY_MICROPHONE_DEVICE_ID = "microphone_device_id"
+        private const val KEY_MICROPHONE_SELECTION = "microphone_selection"
         private const val KEY_COMPACT_BUBBLE = "compact_bubble"
         private const val KEY_COMPACT_BUBBLE_EDGE_RIGHT = "compact_bubble_edge_right"
         private const val KEY_COMPACT_BUBBLE_VERTICAL_FRACTION = "compact_bubble_vertical_fraction"

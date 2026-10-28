@@ -27,7 +27,11 @@ class FocusAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
-        refreshKeyboardState()
+        try {
+            refreshKeyboardState()
+        } catch (_: RuntimeException) {
+            // A crash in an accessibility callback kills the whole app process.
+        }
     }
 
     override fun onDestroy() {
@@ -45,6 +49,14 @@ class FocusAccessibilityService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
+        try {
+            handleEvent(event)
+        } catch (_: RuntimeException) {
+            // An uncaught exception in an accessibility service kills the app process.
+        }
+    }
+
+    private fun handleEvent(event: AccessibilityEvent) {
         val pkg = event.packageName?.toString()
         // Voicey's pill emits accessibility events while it animates. Those events
         // must never replace the actual editor package used for cleanup/formatting.

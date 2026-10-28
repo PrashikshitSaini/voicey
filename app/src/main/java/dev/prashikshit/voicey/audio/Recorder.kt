@@ -55,9 +55,13 @@ class Recorder(private val context: Context) {
     @Volatile
     var captureFailureListener: ((Throwable) -> Unit)? = null
 
+    /** Called from the starting thread when automatic routing had to fall back to the phone mic. */
+    @Volatile
+    var noticeListener: ((String) -> Unit)? = null
+
     @SuppressLint("MissingPermission")
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
-    fun start(microphoneDeviceId: Int = 0) {
+    fun start(microphoneSelection: String = MICROPHONE_AUTO) {
         check(record == null && captureThread == null) { "Recorder already started" }
 
         val minBuffer = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT)
@@ -67,25 +71,37 @@ class Recorder(private val context: Context) {
         val bufferSize = maxOf(minBuffer * 2, MIN_BUFFER_BYTES)
 
         val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        val selectedDevice = MicrophoneDevices.findConnectedExternalInput(audioManager, microphoneDeviceId)
-        if (microphoneDeviceId != 0 && selectedDevice == null) {
-            throw IOException("Selected microphone disconnected; select it again or choose System default")
+        val picked = MicrophoneDevices.select(audioManager, microphoneSelection)
+        var bluetoothRoute: BluetoothMicrophoneRoute? = null
+        var captureDevice = picked.device
+        val bluetoothDevice = if (picked.bluetooth) picked.device else null
+        if (bluetoothDevice != null) {
+            val route = BluetoothMicrophoneRoute(context)
+            val connected = try {
+                route.connect(bluetoothDevice)
+            } catch (failure: Exception) {
+                try { route.close() } catch (cleanup: Exception) { failure.addSuppressed(cleanup) }
+                if (picked.explicit) throw failure
+                noticeListener?.invoke("Headset mic unavailable — using phone mic")
+                null
+            }
+            captureDevice = connected
+            if (connected != null) bluetoothRoute = route
         }
-        val bluetoothRoute = selectedDevice?.takeIf(MicrophoneDevices::isBluetooth)?.let {
-            BluetoothMicrophoneRoute(context)
-        }
-        val captureDevice = if (bluetoothRoute != null && selectedDevice != null) {
-            bluetoothRoute.connect(selectedDevice)
-        } else selectedDevice
-        // Keep wired/USB fallback, but never silently substitute the phone for selected earbuds.
         val ar = try {
             createAndStart(bufferSize, captureDevice)
         } catch (selectedFailure: Exception) {
-            if (bluetoothRoute != null) {
-                try { bluetoothRoute.close() } catch (cleanup: Exception) { selectedFailure.addSuppressed(cleanup) }
+            // An explicitly pinned headset is never silently swapped for the phone mic.
+            if (picked.explicit && bluetoothRoute != null) {
+                try { bluetoothRoute?.close() } catch (cleanup: Exception) { selectedFailure.addSuppressed(cleanup) }
                 throw selectedFailure
             }
-            if (microphoneDeviceId == 0 || selectedDevice == null) throw selectedFailure
+            if (captureDevice == null) throw selectedFailure
+            if (bluetoothRoute != null) {
+                try { bluetoothRoute?.close() } catch (_: Exception) {}
+                bluetoothRoute = null
+                noticeListener?.invoke("Headset mic unavailable — using phone mic")
+            }
             createAndStart(bufferSize, null)
         }
 

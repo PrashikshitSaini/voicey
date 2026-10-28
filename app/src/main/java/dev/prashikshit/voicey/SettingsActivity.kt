@@ -24,6 +24,8 @@ import dev.prashikshit.voicey.data.LanguageCatalog
 import dev.prashikshit.voicey.data.LearnedCorrections
 import dev.prashikshit.voicey.data.Settings
 import dev.prashikshit.voicey.databinding.ActivitySettingsBinding
+import dev.prashikshit.voicey.audio.MICROPHONE_AUTO
+import dev.prashikshit.voicey.audio.MICROPHONE_PHONE
 import dev.prashikshit.voicey.audio.MicrophoneDevices
 import dev.prashikshit.voicey.service.FloatingBubbleService
 import dev.prashikshit.voicey.service.FocusAccessibilityService
@@ -38,7 +40,7 @@ class SettingsActivity : AppCompatActivity() {
     private var revertingLiveDraftToggle = false
     private var liveDraftDisclosurePending = false
     private var microphoneOptions = emptyList<MicrophoneOption>()
-    private var selectedMicrophoneDeviceId = 0
+    private var selectedMicrophone = MICROPHONE_AUTO
     private val microphoneDeviceCallback = object : AudioDeviceCallback() {
         override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) =
             runOnUiThread { refreshMicrophoneDevices() }
@@ -123,7 +125,7 @@ class SettingsActivity : AppCompatActivity() {
         switchNeverUseClipboard.isChecked = settings.neverUseClipboard
         switchSmartFormatting.isChecked = settings.smartFormatting
         switchCompactBubble.isChecked = settings.compactBubble
-        selectedMicrophoneDeviceId = settings.microphoneDeviceId
+        selectedMicrophone = settings.microphoneSelection
     }
 
     /**
@@ -145,27 +147,32 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun wireMicrophoneDropdown() {
         binding.inputMicrophone.setOnItemClickListener { _, _, position, _ ->
-            selectedMicrophoneDeviceId = microphoneOptions.getOrNull(position)?.id ?: 0
+            selectedMicrophone = microphoneOptions.getOrNull(position)?.key ?: MICROPHONE_AUTO
         }
     }
 
     private fun refreshMicrophoneDevices() {
         val audioManager = getSystemService(AudioManager::class.java)
         microphoneOptions = buildList {
-            add(MicrophoneOption(0, getString(R.string.microphone_system_default)))
+            add(MicrophoneOption(MICROPHONE_AUTO, getString(R.string.microphone_automatic)))
+            add(MicrophoneOption(MICROPHONE_PHONE, getString(R.string.microphone_phone)))
+            val keys = mutableSetOf(MICROPHONE_AUTO, MICROPHONE_PHONE)
             MicrophoneDevices.connectedExternalInputs(audioManager)
                 .forEach { device ->
-                    add(MicrophoneOption(device.id, microphoneLabel(device)))
+                    val key = MicrophoneDevices.stableKey(device)
+                    if (keys.add(key)) add(MicrophoneOption(key, microphoneLabel(device)))
                 }
+            // A pinned device that is away stays selected until the user picks something else.
+            if (keys.add(selectedMicrophone)) {
+                add(MicrophoneOption(selectedMicrophone, getString(R.string.microphone_saved_disconnected)))
+            }
         }
 
-        // Device callbacks must not replace a selection the user has not saved yet.
-        selectedMicrophoneDeviceId = microphoneOptions.firstOrNull { it.id == selectedMicrophoneDeviceId }?.id ?: 0
         binding.inputMicrophone.setAdapter(
             NoFilterArrayAdapter(this, microphoneOptions.map(MicrophoneOption::label))
         )
         binding.inputMicrophone.setText(
-            microphoneOptions.first { it.id == selectedMicrophoneDeviceId }.label,
+            microphoneOptions.first { it.key == selectedMicrophone }.label,
             false,
         )
     }
@@ -249,7 +256,7 @@ class SettingsActivity : AppCompatActivity() {
             smartFormatting = binding.switchSmartFormatting.isChecked,
             liveDraftPreview = binding.switchLiveDraftPreview.isChecked,
             liveDraftPreviewDisclosureAccepted = stored.liveDraftPreviewDisclosureAccepted,
-            microphoneDeviceId = selectedMicrophoneDeviceId,
+            microphoneSelection = selectedMicrophone,
             compactBubble = binding.switchCompactBubble.isChecked,
             compactBubbleEdgeRight = stored.compactBubbleEdgeRight,
             compactBubbleVerticalFraction = stored.compactBubbleVerticalFraction,
@@ -462,5 +469,5 @@ class SettingsActivity : AppCompatActivity() {
         override fun getFilter(): Filter = noFilter
     }
 
-    private data class MicrophoneOption(val id: Int, val label: String)
+    private data class MicrophoneOption(val key: String, val label: String)
 }
