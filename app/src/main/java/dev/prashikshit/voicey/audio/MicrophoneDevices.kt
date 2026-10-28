@@ -23,7 +23,9 @@ object MicrophoneDevices {
     /** Stable across reconnects; ids are reassigned by Android. */
     fun stableKey(device: AudioDeviceInfo): String = when {
         isBluetooth(device) -> {
-            val address = device.address?.trim().orEmpty()
+            val address = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                device.address?.trim().orEmpty()
+            } else ""
             if (address.isNotEmpty()) "bt:$address" else "bt:name:${deviceName(device)}"
         }
         device.type == AudioDeviceInfo.TYPE_WIRED_HEADSET -> "wired"

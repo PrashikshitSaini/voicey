@@ -10,8 +10,8 @@ internal data class MicrophoneCandidate(val key: String, val kind: MicrophoneKin
 internal data class MicrophoneChoice(val candidate: MicrophoneCandidate?, val explicit: Boolean)
 
 /**
- * Picks an input from plain data. Automatic prefers wired/USB, then a Bluetooth headset, then
- * the phone default. A pinned key that is absent silently falls back to automatic selection.
+ * Picks an input from plain data. Automatic prefers wired, then USB, then a Bluetooth headset,
+ * then the phone default. A pinned key that is absent silently falls back to automatic selection.
  */
 internal fun chooseMicrophone(
     selection: String,
@@ -27,7 +27,10 @@ internal fun chooseMicrophone(
         }
     }
     val external = candidates.filter { it.kind != MicrophoneKind.PHONE }
-    external.firstOrNull { it.kind == MicrophoneKind.WIRED || it.kind == MicrophoneKind.USB }?.let {
+    external.firstOrNull { it.kind == MicrophoneKind.WIRED }?.let {
+        return MicrophoneChoice(it, explicit = false)
+    }
+    external.firstOrNull { it.kind == MicrophoneKind.USB }?.let {
         return MicrophoneChoice(it, explicit = false)
     }
     val bluetooth = external.filter { it.kind == MicrophoneKind.BLUETOOTH }
