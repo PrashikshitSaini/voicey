@@ -34,6 +34,9 @@ class FocusAccessibilityService : AccessibilityService() {
         } catch (_: RuntimeException) {
             // A crash in an accessibility callback kills the whole app process.
         }
+        // The system always reconnects the accessibility service after boot/update, even
+        // when the OEM skips MY_PACKAGE_REPLACED. Harmless if the bubble already runs.
+        AutoStart.restoreIfWanted(this)
     }
 
     override fun onDestroy() {

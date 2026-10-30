@@ -1,13 +1,8 @@
 package dev.prashikshit.voicey.service
 
-import android.Manifest
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.provider.Settings as AndroidSettings
-import androidx.core.content.ContextCompat
-import dev.prashikshit.voicey.data.Settings
 
 /**
  * Restores the bubble after a reboot or an app update, but only when the user left it
@@ -23,21 +18,7 @@ class BootReceiver : BroadcastReceiver() {
             ACTION_QUICKBOOT_POWERON -> Unit
             else -> return
         }
-        try {
-            if (!Settings.load(context).startAutomatically) return
-            if (!Settings.isBubbleWanted(context)) return
-            if (!AndroidSettings.canDrawOverlays(context)) return
-            val micGranted = ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.RECORD_AUDIO,
-            ) == PackageManager.PERMISSION_GRANTED
-            if (!micGranted) return
-            // BOOT_COMPLETED and MY_PACKAGE_REPLACED are exempt from the Android 12+
-            // background foreground-service start restrictions.
-            FloatingBubbleService.start(context)
-        } catch (_: Exception) {
-            // A receiver must never crash the app.
-        }
+        AutoStart.restoreIfWanted(context)
     }
 
     private companion object {
