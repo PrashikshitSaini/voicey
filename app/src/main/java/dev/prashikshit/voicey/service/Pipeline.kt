@@ -306,6 +306,7 @@ class Pipeline(
         }
 
         val editorPackage = FocusAccessibilityService.currentEditorPackageName()
+        val imeOptions = FocusAccessibilityService.currentEditorImeOptions()
         val (focusedNode, targetPackage, ctx) = withContext(Dispatchers.Default) {
             val node = FocusAccessibilityService.findFocusedEditable()
             val nodePackage = node?.packageName?.toString().orEmpty()
@@ -313,7 +314,7 @@ class Pipeline(
                 .takeIf { it.isNotBlank() }
                 ?: nodePackage.takeIf { it.isNotBlank() && it != context.packageName }
                 ?: FocusAccessibilityService.currentPackageName()
-            Triple(node, target, ContextReader.read(node, target))
+            Triple(node, target, ContextReader.read(node, target, imeOptions))
         }
         val cleaned = PostProcessor(settings, corrections).clean(raw, ctx)
         val toInsert = spaceForInsertion(cleaned.ifBlank { raw }, ctx.textBefore, ctx.textAfter)

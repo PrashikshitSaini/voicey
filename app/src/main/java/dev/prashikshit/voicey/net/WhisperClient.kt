@@ -63,12 +63,14 @@ class WhisperClient(private val settings: Settings) {
             return@withContext first.text
         }
         if (first.noSpeechProb >= ECHO_SILENCE_THRESHOLD) return@withContext ""
-        // Fresh body: a request body can only be written once.
-        transcribeBody(
+        // Fresh body: a request body can only be written once. The first pass already
+        // said the audio was undecodable, so the retry must be confident to be believed.
+        val retry = transcribeBody(
             filename = audio.name,
             body = audio.asRequestBody("audio/wav".toMediaType()),
             vocabularyPrompt = "",
-        ).text
+        )
+        if (isUnreliableRetry(retry.text, retry.noSpeechProb)) "" else retry.text
     }
 
     /**
@@ -182,7 +184,7 @@ class WhisperClient(private val settings: Settings) {
 
         if (noSpeechProb >= UNIVERSAL_NO_SPEECH_THRESHOLD) return true
 
-        val normalized = text.lowercase().trim { !it.isLetterOrDigit() }
+        val normalized = normalizeHallucinationText(text)
         if (normalized in KNOWN_HALLUCINATION_PHRASES &&
             noSpeechProb >= KNOWN_PHRASE_THRESHOLD
         ) {
@@ -204,28 +206,76 @@ class WhisperClient(private val settings: Settings) {
          * real short utterances safe while still catching the silent-tap case.
          */
         const val UNIVERSAL_NO_SPEECH_THRESHOLD = 0.6
-
-        /**
-         * Lifted from FreeFlow's TranscriptionService.swift. These are phrases
-         * Whisper-large-v3 has been observed to hallucinate on near-silent audio.
-         */
-        val KNOWN_HALLUCINATION_PHRASES = setOf(
-            "thank you",
-            "thank you for watching",
-            "thank you very much",
-            "thank you so much",
-            "thanks for watching",
-            "please subscribe",
-            "like and subscribe",
-            "subtitles by",
-            "subtitles by the amara org community",
-            "you",
-        )
     }
 
     /** Filtered transcript plus the first segment's silence score. */
     private data class Transcript(val text: String, val noSpeechProb: Double)
 }
+
+/** Lowercase, then drop non-letter/digit characters from both ends. */
+internal fun normalizeHallucinationText(text: String): String =
+    text.lowercase().trim { !it.isLetterOrDigit() }
+
+/**
+ * True when a no-prompt retry is still not trustworthy: it repeats a known silence
+ * hallucination phrase, or its first segment is unsure there was any speech at all.
+ */
+internal fun isUnreliableRetry(text: String, noSpeechProb: Double): Boolean =
+    normalizeHallucinationText(text) in KNOWN_HALLUCINATION_PHRASES ||
+        noSpeechProb >= RETRY_NO_SPEECH_THRESHOLD
+
+private const val RETRY_NO_SPEECH_THRESHOLD = 0.3
+
+/**
+ * Lifted from FreeFlow's TranscriptionService.swift plus observed multilingual
+ * silence hallucinations. Whisper-large-v3 emits these on near-silent audio.
+ * Entries must already be in normalised form (see [normalizeHallucinationText]).
+ */
+internal val KNOWN_HALLUCINATION_PHRASES = setOf(
+    "thank you",
+    "thank you for watching",
+    "thank you very much",
+    "thank you so much",
+    "thanks for watching",
+    "please subscribe",
+    "like and subscribe",
+    "subtitles by",
+    "subtitles by the amara org community",
+    "you",
+    "bye",
+    "thanks",
+    // Korean
+    "안녕하세요",
+    "감사합니다",
+    "시청해주셔서 감사합니다",
+    "구독과 좋아요 부탁드립니다",
+    // Japanese
+    "ご視聴ありがとうございました",
+    "ありがとうございました",
+    "ありがとうございます",
+    // Chinese
+    "谢谢观看",
+    "谢谢大家",
+    "字幕由amara.org社区提供",
+    "请不吝点赞 订阅 转发 打赏支持明镜与点点栏目",
+    // Russian
+    "продолжение следует",
+    "спасибо за просмотр",
+    "субтитры сделал dimatorzok",
+    // Hindi
+    "धन्यवाद",
+    // Spanish
+    "gracias por ver",
+    "gracias por ver el video",
+    // Portuguese
+    "obrigado por assistir",
+    // French
+    "sous-titres réalisés par la communauté d'amara.org",
+    "merci d'avoir regardé",
+    // German
+    "untertitel der amara.org-community",
+    "vielen dank fürs zuschauen",
+)
 
 private val WORD_TOKEN = Regex("[\\p{L}\\p{M}\\p{N}]+")
 

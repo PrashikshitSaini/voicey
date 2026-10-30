@@ -15,7 +15,7 @@ object ContextReader {
 
     private const val MAX_CONTEXT_CHARS = 1000
 
-    fun read(node: AccessibilityNodeInfo?, packageName: String?): CleanupContext {
+    fun read(node: AccessibilityNodeInfo?, packageName: String?, imeOptions: Int = 0): CleanupContext {
         if (node == null) return CleanupContext.EMPTY
         // Reject hint/placeholder text — sending it to the cleanup LLM as "field context"
         // both wastes tokens and risks the model treating the hint as user-typed content
@@ -27,7 +27,7 @@ object ContextReader {
                 textBefore = "",
                 textAfter = "",
                 fieldHint = fieldHint(node),
-                fieldKind = fieldKind(node),
+                fieldKind = fieldKind(node, imeOptions),
             )
         }
         val selectionStart = node.textSelectionStart.takeIf { it >= 0 } ?: text.length
@@ -39,12 +39,12 @@ object ContextReader {
             textBefore = before,
             textAfter = after,
             fieldHint = fieldHint(node),
-            fieldKind = fieldKind(node),
+            fieldKind = fieldKind(node, imeOptions),
         )
     }
 
-    private fun fieldKind(node: AccessibilityNodeInfo) =
-        classifyField(node.inputType, node.isMultiLine, fieldHint(node))
+    private fun fieldKind(node: AccessibilityNodeInfo, imeOptions: Int) =
+        classifyField(node.inputType, node.isMultiLine, fieldHint(node), imeOptions)
 
     private fun fieldHint(node: AccessibilityNodeInfo): String {
         val value = node.hintText?.toString().orEmpty()

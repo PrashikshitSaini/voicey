@@ -48,6 +48,23 @@ class FieldKindTest {
     }
 
     @Test
+    fun searchImeActionWinsOverHintlessField() {
+        assertEquals(FieldKind.SEARCH, classifyField(0, false, "Ask Google", IME_ACTION_SEARCH))
+    }
+
+    @Test
+    fun goAloneDoesNotChangeTheResult() {
+        assertEquals(FieldKind.UNKNOWN, classifyField(0, false, "", IME_ACTION_GO))
+        assertEquals(FieldKind.SINGLE_LINE, classifyField(TYPE_TEXT, false, "", IME_ACTION_GO))
+    }
+
+    @Test
+    fun goActionWithUrlHintIsUrl() {
+        assertEquals(FieldKind.URL, classifyField(TYPE_TEXT, false, "url", IME_ACTION_GO))
+        assertEquals(FieldKind.URL, classifyField(TYPE_TEXT_VARIATION_URI, false, "", IME_ACTION_GO))
+    }
+
+    @Test
     fun plainTextFieldIsSingleLine() {
         assertEquals(FieldKind.SINGLE_LINE, classifyField(TYPE_TEXT, false, ""))
     }
@@ -67,5 +84,7 @@ class FieldKindTest {
         const val TYPE_TEXT_VARIATION_PERSON_NAME = 0x60
         const val TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS = 0xd0
         const val TYPE_TEXT_FLAG_MULTI_LINE = 0x20000
+        const val IME_ACTION_GO = 2
+        const val IME_ACTION_SEARCH = 3
     }
 }

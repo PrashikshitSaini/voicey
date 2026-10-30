@@ -15,15 +15,27 @@ private const val TYPE_TEXT_VARIATION_EMAIL_SUBJECT = 0x30
 private const val TYPE_TEXT_VARIATION_PERSON_NAME = 0x60
 private const val TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS = 0xd0
 private const val TYPE_TEXT_FLAG_MULTI_LINE = 0x20000
+// Literal android.view.inputmethod.EditorInfo values, also pure JVM.
+private const val IME_MASK_ACTION = 0x000000ff
+private const val IME_ACTION_GO = 2
+private const val IME_ACTION_SEARCH = 3
 
-internal fun classifyField(inputType: Int, isMultiLine: Boolean, hint: String): FieldKind {
+internal fun classifyField(
+    inputType: Int,
+    isMultiLine: Boolean,
+    hint: String,
+    imeAction: Int = 0,
+): FieldKind {
     val normalized = hint.trim().lowercase()
+    val action = imeAction and IME_MASK_ACTION
+    if (action == IME_ACTION_SEARCH) return FieldKind.SEARCH
     if (normalized.contains("search")) return FieldKind.SEARCH
 
     val variation = inputType and TYPE_MASK_VARIATION
-    if (variation == TYPE_TEXT_VARIATION_URI ||
-        normalized.contains("url") ||
-        normalized.contains("web address")
+    val looksLikeUrl = variation == TYPE_TEXT_VARIATION_URI || normalized.contains("url")
+    if (looksLikeUrl ||
+        normalized.contains("web address") ||
+        (action == IME_ACTION_GO && looksLikeUrl)
     ) return FieldKind.URL
 
     if (variation == TYPE_TEXT_VARIATION_EMAIL_ADDRESS ||

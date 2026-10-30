@@ -259,6 +259,24 @@ class FocusAccessibilityService : AccessibilityService() {
         }
 
         /**
+         * IME action advertised by the live editor, or 0 when unknown, older than
+         * Android 13, or the editor is Voicey's own field.
+         */
+        fun currentEditorImeOptions(): Int {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return 0
+            val svc = instance ?: return 0
+            return try {
+                svc.inputMethod
+                    ?.currentInputEditorInfo
+                    ?.takeIf { it.packageName != svc.packageName }
+                    ?.imeOptions
+                    ?: 0
+            } catch (_: RuntimeException) {
+                0
+            }
+        }
+
+        /**
          * Returns the currently focused text-input node, or null. Caller must recycle.
          *
          * Resolution order:
