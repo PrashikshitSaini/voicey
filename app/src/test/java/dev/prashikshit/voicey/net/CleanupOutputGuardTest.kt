@@ -63,6 +63,7 @@ KNOWN_CORRECTIONS (the user previously fixed these transcription mistakes)"""
     fun markerDetectionIsCaseInsensitive() {
         assertTrue(CleanupOutputGuard.containsInternalScaffolding("foreground_app: Voicey"))
         assertTrue(CleanupOutputGuard.containsInternalScaffolding("focused_field_hint: Message"))
+        assertTrue(CleanupOutputGuard.containsInternalScaffolding("focused_field_type: subject"))
         assertTrue(CleanupOutputGuard.containsInternalScaffolding("voicey_app_formatting_policy"))
     }
 

@@ -2,6 +2,7 @@ package dev.prashikshit.voicey.service
 
 import android.view.accessibility.AccessibilityNodeInfo
 import dev.prashikshit.voicey.net.CleanupContext
+import dev.prashikshit.voicey.net.classifyField
 
 /**
  * Reads contextual hints from the currently focused accessibility node so the cleanup
@@ -26,6 +27,7 @@ object ContextReader {
                 textBefore = "",
                 textAfter = "",
                 fieldHint = fieldHint(node),
+                fieldKind = fieldKind(node),
             )
         }
         val selectionStart = node.textSelectionStart.takeIf { it >= 0 } ?: text.length
@@ -37,8 +39,12 @@ object ContextReader {
             textBefore = before,
             textAfter = after,
             fieldHint = fieldHint(node),
+            fieldKind = fieldKind(node),
         )
     }
+
+    private fun fieldKind(node: AccessibilityNodeInfo) =
+        classifyField(node.inputType, node.isMultiLine, fieldHint(node))
 
     private fun fieldHint(node: AccessibilityNodeInfo): String {
         val value = node.hintText?.toString().orEmpty()

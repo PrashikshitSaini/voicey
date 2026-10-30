@@ -316,7 +316,7 @@ class Pipeline(
             Triple(node, target, ContextReader.read(node, target))
         }
         val cleaned = PostProcessor(settings, corrections).clean(raw, ctx)
-        val toInsert = cleaned.ifBlank { raw }
+        val toInsert = spaceForInsertion(cleaned.ifBlank { raw }, ctx.textBefore, ctx.textAfter)
 
         val result = injector.insert(
             node = focusedNode,

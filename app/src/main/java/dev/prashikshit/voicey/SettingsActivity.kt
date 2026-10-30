@@ -144,6 +144,7 @@ class SettingsActivity : AppCompatActivity() {
         switchNeverUseClipboard.isChecked = settings.neverUseClipboard
         switchSmartFormatting.isChecked = settings.smartFormatting
         switchCompactBubble.isChecked = settings.compactBubble
+        switchStartAutomatically.isChecked = settings.startAutomatically
         selectedMicrophone = settings.microphoneSelection
     }
 
@@ -279,6 +280,7 @@ class SettingsActivity : AppCompatActivity() {
             compactBubble = binding.switchCompactBubble.isChecked,
             compactBubbleEdgeRight = stored.compactBubbleEdgeRight,
             compactBubbleVerticalFraction = stored.compactBubbleVerticalFraction,
+            startAutomatically = binding.switchStartAutomatically.isChecked,
         )
         Settings.save(this, current)
     }
@@ -434,6 +436,7 @@ class SettingsActivity : AppCompatActivity() {
         binding.btnToggleBubble.setOnClickListener {
             save()
             if (isBubbleRunning()) {
+                Settings.setBubbleWanted(this, false)
                 FloatingBubbleService.stop(this)
             } else {
                 val pending = firstPendingStep()

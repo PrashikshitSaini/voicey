@@ -166,6 +166,11 @@ class FloatingBubbleService : LifecycleService() {
         compactBubbleVerticalFraction = settings?.compactBubbleVerticalFraction ?: 0.5f
         if (settings?.soundFeedback ?: true) soundFeedback = SoundFeedback(this)
         if (!addBubble()) return
+        try {
+            Settings.setBubbleWanted(this, true)
+        } catch (_: Exception) {
+            // Preference persistence is best-effort; the bubble is already up.
+        }
         CorrectionLearner.setFeedbackListener(::showLearningFeedback)
         // Delivers the current keyboard state immediately, so the pill starts hidden
         // when no keyboard is open (and positioned correctly when one already is).
@@ -175,6 +180,11 @@ class FloatingBubbleService : LifecycleService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
         if (intent?.action == ACTION_STOP) {
+            try {
+                Settings.setBubbleWanted(this, false)
+            } catch (_: Exception) {
+                // Preference persistence is best-effort; stopping still wins.
+            }
             stopSelf()
             return START_NOT_STICKY
         }

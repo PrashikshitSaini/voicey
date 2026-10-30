@@ -49,11 +49,26 @@ class WhisperClient(private val settings: Settings) {
         // verbatim spoken dictation…" caused that exact phrase to appear in the
         // output on silent taps. The only legitimate use of `prompt` is keyword
         // biasing, so we only send it when the user has configured vocabulary terms.
+        //
+        // Whisper can still echo that vocabulary prompt back on silence or on speech it
+        // cannot decode, so a pure echo triggers one retry without the prompt (unless the
+        // clip is plainly silent). The cleanup model still receives the vocabulary.
+        val prompt = settings.vocabulary.joinToString(", ").trim()
+        val first = transcribeBody(
+            filename = audio.name,
+            body = audio.asRequestBody("audio/wav".toMediaType()),
+            vocabularyPrompt = prompt,
+        )
+        if (prompt.isEmpty() || !isVocabularyEcho(first.text, prompt)) {
+            return@withContext first.text
+        }
+        if (first.noSpeechProb >= ECHO_SILENCE_THRESHOLD) return@withContext ""
+        // Fresh body: a request body can only be written once.
         transcribeBody(
             filename = audio.name,
             body = audio.asRequestBody("audio/wav".toMediaType()),
-            vocabularyPrompt = settings.vocabulary.joinToString(", ").trim(),
-        )
+            vocabularyPrompt = "",
+        ).text
     }
 
     /**
@@ -68,7 +83,7 @@ class WhisperClient(private val settings: Settings) {
             filename = "voicey-live-preview.wav",
             body = wav.toRequestBody("audio/wav".toMediaType()),
             vocabularyPrompt = "",
-        )
+        ).text
     }
 
     /** Wraps in-memory 16 kHz PCM in a WAV header without creating a preview file. */
@@ -94,7 +109,7 @@ class WhisperClient(private val settings: Settings) {
         filename: String,
         body: okhttp3.RequestBody,
         vocabularyPrompt: String,
-    ): String {
+    ): Transcript {
         val multipartBuilder = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
             .addFormDataPart("model", settings.transcriptionModel)
@@ -126,7 +141,7 @@ class WhisperClient(private val settings: Settings) {
         }
     }
 
-    private fun parseAndFilter(body: String): String {
+    private fun parseAndFilter(body: String): Transcript {
         val json = try {
             JSONObject(body)
         } catch (e: Exception) {
@@ -134,12 +149,16 @@ class WhisperClient(private val settings: Settings) {
             // plain text even when verbose_json is requested. Treat that as the
             // transcript and skip hallucination filtering — without per-segment
             // metadata we can't make the call safely.
-            return body.trim()
+            return Transcript(body.trim(), 0.0)
         }
         val text = json.optString("text").trim()
-        if (text.isEmpty()) return ""
-        if (isHallucination(text, json)) return ""
-        return text
+        val noSpeechProb = json.optJSONArray("segments")
+            ?.optJSONObject(0)
+            ?.optDouble("no_speech_prob", 0.0)
+            ?: 0.0
+        if (text.isEmpty()) return Transcript("", noSpeechProb)
+        if (isHallucination(text, json)) return Transcript("", noSpeechProb)
+        return Transcript(text, noSpeechProb)
     }
 
     /**
@@ -173,6 +192,9 @@ class WhisperClient(private val settings: Settings) {
     }
 
     private companion object {
+        /** Echo of the vocabulary prompt at or above this silence score means just drop it. */
+        const val ECHO_SILENCE_THRESHOLD = 0.5
+
         /** Conservative phrase-match threshold lifted from FreeFlow. */
         const val KNOWN_PHRASE_THRESHOLD = 0.1
 
@@ -200,6 +222,24 @@ class WhisperClient(private val settings: Settings) {
             "you",
         )
     }
+
+    /** Filtered transcript plus the first segment's silence score. */
+    private data class Transcript(val text: String, val noSpeechProb: Double)
+}
+
+private val WORD_TOKEN = Regex("[\\p{L}\\p{M}\\p{N}]+")
+
+/**
+ * True when [text] consists only of words drawn from [vocabularyPrompt]. Whisper echoes
+ * the keyword-biasing prompt on silence or on audio it cannot decode, which would
+ * otherwise land the user's own vocabulary in the transcript.
+ */
+internal fun isVocabularyEcho(text: String, vocabularyPrompt: String): Boolean {
+    val textTokens = WORD_TOKEN.findAll(text.lowercase()).map { it.value }.toList()
+    if (textTokens.isEmpty()) return false
+    val promptTokens = WORD_TOKEN.findAll(vocabularyPrompt.lowercase()).map { it.value }.toSet()
+    if (promptTokens.isEmpty()) return false
+    return textTokens.all { it in promptTokens }
 }
 
 class TranscriptionException(message: String, cause: Throwable? = null) : Exception(message, cause)

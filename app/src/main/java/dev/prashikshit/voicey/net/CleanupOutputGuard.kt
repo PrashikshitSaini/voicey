@@ -54,6 +54,7 @@ internal object CleanupOutputGuard {
         "RAW_TRANSCRIPTION:",
         "FOREGROUND_APP:",
         "FOCUSED_FIELD_HINT:",
+        "FOCUSED_FIELD_TYPE:",
         "APP_CATEGORY:",
         "FIELD_CONTEXT_BEFORE_CURSOR:",
         "FIELD_CONTEXT_AFTER_CURSOR:",

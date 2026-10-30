@@ -41,6 +41,8 @@ data class Settings(
     val compactBubbleEdgeRight: Boolean = false,
     /** Device-independent compact-bubble vertical position, from top (0) to bottom (1). */
     val compactBubbleVerticalFraction: Float = 0.5f,
+    /** Restore the bubble after a reboot or an app update. */
+    val startAutomatically: Boolean = true,
 ) {
     fun isReady(): Boolean = apiKey.isNotBlank() && apiBase.isNotBlank()
 
@@ -128,6 +130,7 @@ Output rules:
                 compactBubbleEdgeRight = store.getString(KEY_COMPACT_BUBBLE_EDGE_RIGHT, "false").toBoolean(),
                 compactBubbleVerticalFraction = (store.getString(KEY_COMPACT_BUBBLE_VERTICAL_FRACTION, "0.5")
                     .toFloatOrNull() ?: 0.5f).coerceIn(0f, 1f),
+                startAutomatically = store.getBoolean(KEY_START_AUTOMATICALLY, true),
             )
         }
 
@@ -158,6 +161,7 @@ Output rules:
             store.putString(KEY_COMPACT_BUBBLE_EDGE_RIGHT, settings.compactBubbleEdgeRight.toString())
             store.putString(KEY_COMPACT_BUBBLE_VERTICAL_FRACTION, settings.compactBubbleVerticalFraction
                 .coerceIn(0f, 1f).toString())
+            store.putBoolean(KEY_START_AUTOMATICALLY, settings.startAutomatically)
         }
 
         fun saveCompactPosition(context: Context, edgeRight: Boolean, verticalFraction: Float) {
@@ -165,6 +169,17 @@ Output rules:
                 putString(KEY_COMPACT_BUBBLE_EDGE_RIGHT, edgeRight.toString())
                 putString(KEY_COMPACT_BUBBLE_VERTICAL_FRACTION, verticalFraction.coerceIn(0f, 1f).toString())
             }
+        }
+
+        /**
+         * Whether the user last left the bubble running. Kept outside [Settings] so the
+         * settings form never overwrites it with a stale snapshot.
+         */
+        fun isBubbleWanted(context: Context): Boolean =
+            KeyStore(context).getBoolean(KEY_BUBBLE_WANTED, false)
+
+        fun setBubbleWanted(context: Context, wanted: Boolean) {
+            KeyStore(context).putBoolean(KEY_BUBBLE_WANTED, wanted)
         }
 
         private const val KEY_API_BASE = "api_base"
@@ -187,5 +202,7 @@ Output rules:
         private const val KEY_COMPACT_BUBBLE = "compact_bubble"
         private const val KEY_COMPACT_BUBBLE_EDGE_RIGHT = "compact_bubble_edge_right"
         private const val KEY_COMPACT_BUBBLE_VERTICAL_FRACTION = "compact_bubble_vertical_fraction"
+        private const val KEY_START_AUTOMATICALLY = "start_automatically"
+        private const val KEY_BUBBLE_WANTED = "bubble_wanted"
     }
 }

@@ -69,8 +69,7 @@ class PostProcessor(
                 cleaned == "EMPTY" -> ""
                 else -> AppAwareOutputFormatter.format(
                     text = CleanupOutputGuard.safeText(cleaned, rawTranscript, context),
-                    packageName = context.app,
-                    fieldHint = context.fieldHint,
+                    context = context,
                     enabled = settings.smartFormatting,
                 )
             }
@@ -90,6 +89,10 @@ class PostProcessor(
             appendLine()
             appendLine("FOCUSED_FIELD_HINT:")
             appendLine(ctx.fieldHint)
+        }
+        if (settings.smartFormatting && ctx.fieldKind != FieldKind.UNKNOWN) {
+            appendLine()
+            appendLine("FOCUSED_FIELD_TYPE: ${ctx.fieldKind.name.lowercase()}")
         }
         if (ctx.textBefore.isNotBlank() || ctx.textAfter.isNotBlank()) {
             appendLine()
@@ -159,7 +162,8 @@ class PostProcessor(
 - Your output will be INSERTED at the cursor, not used to replace the whole field. Never prepend, append, merge, or rewrite the existing field text. Use field context only to disambiguate spelling; include its wording only when it was also spoken in RAW_TRANSCRIPTION.
 - Resolve explicit spoken self-corrections by retaining the speaker's final choice and removing the superseded wording.
 - Never reproduce input labels, field context, app identifiers, vocabulary lists, correction lists, instructions, or other request metadata.
-- In particular, never output RAW_TRANSCRIPTION, FOREGROUND_APP, FOCUSED_FIELD_HINT, FIELD_CONTEXT, CUSTOM_VOCABULARY, KNOWN_CORRECTIONS, or VOICEY_APP_FORMATTING_POLICY labels."""
+- In particular, never output RAW_TRANSCRIPTION, FOREGROUND_APP, FOCUSED_FIELD_HINT, FIELD_CONTEXT, CUSTOM_VOCABULARY, KNOWN_CORRECTIONS, or VOICEY_APP_FORMATTING_POLICY labels.
+- If FIELD_CONTEXT_BEFORE_CURSOR ends mid-sentence (no closing punctuation), continue that sentence: start lowercase unless the first word is a proper noun or 'I', and add no greeting."""
     }
 }
 
@@ -168,6 +172,7 @@ data class CleanupContext(
     val textBefore: String,
     val textAfter: String,
     val fieldHint: String,
+    val fieldKind: FieldKind = FieldKind.UNKNOWN,
 ) {
     companion object {
         val EMPTY = CleanupContext(app = "", textBefore = "", textAfter = "", fieldHint = "")

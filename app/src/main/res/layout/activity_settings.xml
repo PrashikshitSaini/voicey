@@ -684,6 +684,22 @@
                 android:padding="16dp">
 
                 <com.google.android.material.materialswitch.MaterialSwitch
+                    android:id="@+id/switch_start_automatically"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/start_automatically_label" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="4dp"
+                    android:layout_marginTop="2dp"
+                    android:layout_marginEnd="4dp"
+                    android:text="@string/start_automatically_helper"
+                    android:textAppearance="?attr/textAppearanceBodySmall"
+                    android:textColor="?attr/colorOnSurfaceVariant" />
+
+                <com.google.android.material.materialswitch.MaterialSwitch
                     android:id="@+id/switch_hold_to_talk"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"

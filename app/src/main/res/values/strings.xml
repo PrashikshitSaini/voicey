@@ -39,6 +39,8 @@
     <string name="prompt_label">System prompt</string>
 
     <string name="hold_to_talk_label">Hold to talk (release to stop)</string>
+    <string name="start_automatically_label">Start Voicey automatically</string>
+    <string name="start_automatically_helper">Turns Voicey back on after your phone restarts or the app updates, unless you turned it off.</string>
     <string name="show_only_while_typing_label">Show pill only while typing</string>
     <string name="compact_bubble_label">Compact bubble</string>
     <string name="compact_bubble_helper">An icon-only button that snaps to the nearest screen edge.</string>
