@@ -14,6 +14,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.text.SpannableStringBuilder
 import android.text.style.ForegroundColorSpan
+import android.view.ContextThemeWrapper
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.MotionEvent
@@ -68,6 +69,7 @@ class FloatingBubbleService : LifecycleService() {
     private lateinit var injector: TextInjector
     private lateinit var pipeline: Pipeline
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val themedContext by lazy { ContextThemeWrapper(this, R.style.Theme_Voicey) }
     private var learningCardView: View? = null
     private val dismissLearningCardRunnable = Runnable { removeLearningCard() }
 
@@ -320,7 +322,7 @@ class FloatingBubbleService : LifecycleService() {
     }
 
     private fun addBubble(): Boolean {
-        bubbleView = LayoutInflater.from(this).inflate(R.layout.bubble_overlay, null) as FrameLayout
+        bubbleView = LayoutInflater.from(themedContext).inflate(R.layout.bubble_overlay, null) as FrameLayout
         bubbleIcon = bubbleView.findViewById(R.id.bubble_icon)
         bubbleProgress = bubbleView.findViewById(R.id.bubble_progress)
         bubbleLabel = bubbleView.findViewById(R.id.bubble_label)
@@ -723,9 +725,7 @@ class FloatingBubbleService : LifecycleService() {
         mainHandler.post {
             if (shuttingDown || !::bubbleView.isInitialized || !bubbleView.isAttachedToWindow) return@post
             removeLearningCard()
-            val card = LayoutInflater.from(this).inflate(R.layout.learning_overlay, null)
-            val message = card.findViewById<TextView>(R.id.learning_message)
-            message.text = if (corrections.size == 1) {
+            val text = if (corrections.size == 1) {
                 getString(
                     R.string.learned_correction_message,
                     corrections.single().wrong,
@@ -733,10 +733,6 @@ class FloatingBubbleService : LifecycleService() {
                 )
             } else {
                 getString(R.string.learned_corrections_count, corrections.size)
-            }
-            card.findViewById<View>(R.id.btn_undo_learning).setOnClickListener {
-                CorrectionLearner.forget(this, corrections)
-                removeLearningCard()
             }
 
             val width = minOf(
@@ -757,13 +753,19 @@ class FloatingBubbleService : LifecycleService() {
                     .coerceAtLeast((24 * density).toInt())
             }
             try {
+                val card = LayoutInflater.from(themedContext).inflate(R.layout.learning_overlay, null)
+                card.findViewById<TextView>(R.id.learning_message).text = text
+                card.findViewById<View>(R.id.btn_undo_learning).setOnClickListener {
+                    CorrectionLearner.forget(this, corrections)
+                    removeLearningCard()
+                }
                 windowManager.addView(card, params)
                 learningCardView = card
                 mainHandler.postDelayed(dismissLearningCardRunnable, LEARNING_CARD_DURATION_MS)
             } catch (_: RuntimeException) {
                 // If Android revokes or temporarily rejects overlay access, learning has
                 // already succeeded. Preserve feedback without crashing the bubble.
-                Toast.makeText(this, message.text, Toast.LENGTH_LONG).show()
+                Toast.makeText(this, text, Toast.LENGTH_LONG).show()
             }
         }
     }
