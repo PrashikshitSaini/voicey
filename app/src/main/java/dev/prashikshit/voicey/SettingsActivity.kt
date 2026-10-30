@@ -2,9 +2,12 @@ package dev.prashikshit.voicey
 
 import android.Manifest
 import android.app.ActivityManager
+import android.content.ActivityNotFoundException
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.ColorStateList
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
@@ -12,14 +15,19 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings as AndroidSettings
+import android.view.MotionEvent
+import android.view.View
+import android.view.inputmethod.InputMethodManager
 import android.widget.ArrayAdapter
 import android.widget.Filter
+import android.widget.ImageView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.widget.doAfterTextChanged
+import com.google.android.material.color.MaterialColors
 import dev.prashikshit.voicey.data.LanguageCatalog
 import dev.prashikshit.voicey.data.LearnedCorrections
 import dev.prashikshit.voicey.data.Settings
@@ -31,14 +39,15 @@ import dev.prashikshit.voicey.service.FloatingBubbleService
 import dev.prashikshit.voicey.service.FocusAccessibilityService
 
 /**
- * One-screen settings + permission grant UI. Loads/saves Settings via the encrypted
- * KeyStore and provides quick links to the three system permission screens we need.
+ * One-screen settings + guided setup UI. Loads/saves Settings via the encrypted
+ * KeyStore and walks the user through each permission or key it needs.
  */
 class SettingsActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivitySettingsBinding
     private var revertingLiveDraftToggle = false
     private var liveDraftDisclosurePending = false
+    private var setupWasComplete: Boolean? = null
     private var microphoneOptions = emptyList<MicrophoneOption>()
     private var selectedMicrophone = MICROPHONE_AUTO
     private val microphoneDeviceCallback = object : AudioDeviceCallback() {
@@ -52,15 +61,23 @@ class SettingsActivity : AppCompatActivity() {
     private val requestRecordAudio = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
-        if (granted) toast("Microphone enabled") else toast("Microphone permission required")
-        refreshPermissionStates()
+        if (!granted && !shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)) {
+            openAppInfo()
+            toast(getString(R.string.setup_permanently_denied))
+        }
+        refreshSetup()
     }
 
     private val requestPostNotifications = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
-        if (granted) toast("Notifications enabled") else toast("Notification permission required for the bubble")
-        refreshPermissionStates()
+        if (!granted &&
+            !shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS)
+        ) {
+            openAppInfo()
+            toast(getString(R.string.setup_permanently_denied))
+        }
+        refreshSetup()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -74,7 +91,9 @@ class SettingsActivity : AppCompatActivity() {
         refreshMicrophoneDevices()
         wireModelStatus()
         wireLiveDraftPreview()
-        wirePermissionButtons()
+        wireSetup()
+        wireAdvancedHeader()
+        wirePromptScrolling()
         wireBubbleToggle()
         wireResetButton()
         wireDictionaryButton()
@@ -82,7 +101,7 @@ class SettingsActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        refreshPermissionStates()
+        refreshSetup()
         refreshMicrophoneDevices()
         refreshBubbleButton()
         refreshDictionarySummary()
@@ -281,19 +300,25 @@ class SettingsActivity : AppCompatActivity() {
         )
     }
 
-    private fun wirePermissionButtons() = with(binding) {
-        btnPermissionMic.setOnClickListener {
+    private fun wireSetup() = with(binding) {
+        val notificationsApplicable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+        rowSetupNotifications.visibility = if (notificationsApplicable) View.VISIBLE else View.GONE
+
+        inputApiKey.doAfterTextChanged { refreshSetup() }
+
+        btnSetupApiKey.setOnClickListener { focusApiKey() }
+        btnGetGroqKey.setOnClickListener { openUrl("https://console.groq.com/keys") }
+        btnSetupMic.setOnClickListener {
             requestRecordAudio.launch(Manifest.permission.RECORD_AUDIO)
         }
-        btnPermissionNotification.setOnClickListener {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        btnSetupNotifications.setOnClickListener {
+            if (notificationsApplicable) {
                 requestPostNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
             } else {
-                toast("Not required on this Android version")
-                refreshPermissionStates()
+                refreshSetup()
             }
         }
-        btnPermissionOverlay.setOnClickListener {
+        btnSetupOverlay.setOnClickListener {
             startActivity(
                 Intent(
                     AndroidSettings.ACTION_MANAGE_OVERLAY_PERMISSION,
@@ -301,29 +326,55 @@ class SettingsActivity : AppCompatActivity() {
                 )
             )
         }
-        btnPermissionAccessibility.setOnClickListener {
-            // On Android 13+ sideloaded apps hit the "Restricted settings" gate when
-            // they try to enable an Accessibility service. There's no public Intent to
-            // open the "Allow restricted settings" menu directly — the deepest link
-            // Android exposes is the App Info screen, where the 3-dot menu lives.
-            // So on 13+ we show a short explainer with both routes, and on 12 and
-            // below we go straight to Accessibility settings as before.
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                showRestrictedSettingsHelper()
-            } else {
-                openAccessibilitySettings()
-            }
+        btnSetupAccessibility.setOnClickListener { openAccessibilitySettings() }
+        // Android 13+ sideloads grey out the Accessibility switch until "Allow restricted
+        // settings" is granted from the App Info ⋮ menu; there is no public Intent for it.
+        btnRestrictedSettings.setOnClickListener {
+            openAppInfo()
+            longToast(getString(R.string.setup_restricted_toast))
         }
     }
 
-    private fun showRestrictedSettingsHelper() {
-        AlertDialog.Builder(this)
-            .setTitle(R.string.restricted_settings_title)
-            .setMessage(R.string.restricted_settings_message)
-            .setPositiveButton(R.string.restricted_settings_open_app_info) { _, _ -> openAppInfo() }
-            .setNegativeButton(R.string.restricted_settings_go_to_accessibility) { _, _ -> openAccessibilitySettings() }
-            .setNeutralButton(android.R.string.cancel, null)
-            .show()
+    private fun openUrl(url: String) {
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        } catch (_: ActivityNotFoundException) {
+            toast("No browser found")
+        }
+    }
+
+    private fun focusApiKey() {
+        binding.scrollRoot.smoothScrollTo(0, binding.cardAi.top)
+        binding.inputApiKey.requestFocus()
+        binding.inputApiKey.postDelayed({
+            getSystemService(InputMethodManager::class.java)
+                .showSoftInput(binding.inputApiKey, InputMethodManager.SHOW_IMPLICIT)
+        }, 300)
+    }
+
+    private fun wireAdvancedHeader() {
+        val startExpanded = binding.layoutCleanupModel.helperText != null
+        binding.containerAdvanced.visibility = if (startExpanded) View.VISIBLE else View.GONE
+        binding.iconAdvancedChevron.rotation = if (startExpanded) 180f else 0f
+        binding.rowAdvancedHeader.setOnClickListener { toggleAdvanced() }
+    }
+
+    private fun toggleAdvanced() {
+        val expanded = binding.containerAdvanced.visibility == View.VISIBLE
+        binding.containerAdvanced.visibility = if (expanded) View.GONE else View.VISIBLE
+        binding.iconAdvancedChevron.rotation = if (expanded) 0f else 180f
+    }
+
+    private fun wirePromptScrolling() {
+        // Let the prompt scroll internally instead of the page scrolling under it.
+        binding.inputPrompt.setOnTouchListener { v, event ->
+            v.parent.requestDisallowInterceptTouchEvent(true)
+            when (event.actionMasked) {
+                MotionEvent.ACTION_UP,
+                MotionEvent.ACTION_CANCEL -> v.parent.requestDisallowInterceptTouchEvent(false)
+            }
+            false
+        }
     }
 
     private fun openAppInfo() {
@@ -335,8 +386,15 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun openAccessibilitySettings() {
-        startActivity(Intent(AndroidSettings.ACTION_ACCESSIBILITY_SETTINGS))
-        toast("Enable \"${getString(R.string.accessibility_label)}\" in the list")
+        val key = ComponentName(this, FocusAccessibilityService::class.java).flattenToString()
+        val intent = Intent(AndroidSettings.ACTION_ACCESSIBILITY_SETTINGS)
+        intent.putExtra(":settings:fragment_args_key", key)
+        intent.putExtra(
+            ":settings:show_fragment_args",
+            Bundle().apply { putString(":settings:fragment_args_key", key) },
+        )
+        startActivity(intent)
+        longToast(getString(R.string.setup_accessibility_toast))
     }
 
     /**
@@ -378,8 +436,9 @@ class SettingsActivity : AppCompatActivity() {
             if (isBubbleRunning()) {
                 FloatingBubbleService.stop(this)
             } else {
-                if (!canRunBubble()) {
-                    toast("Grant all permissions above first")
+                val pending = firstPendingStep()
+                if (pending != null) {
+                    toast(getString(R.string.setup_finish_first, pending))
                     return@setOnClickListener
                 }
                 FloatingBubbleService.start(this)
@@ -389,28 +448,84 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
-    private fun refreshPermissionStates() {
-        binding.btnPermissionMic.setIconResource(
-            if (hasMicPermission()) android.R.drawable.checkbox_on_background
-            else android.R.drawable.checkbox_off_background
+    private fun refreshSetup() {
+        val apiKeyDone = binding.inputApiKey.text?.isNotBlank() == true
+        val micDone = hasMicPermission()
+        val notificationsDone = hasNotificationPermission()
+        val overlayDone = canDrawOverlays()
+        val accessibilityDone = isAccessibilityEnabled()
+        val steps = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            listOf(apiKeyDone, micDone, notificationsDone, overlayDone, accessibilityDone)
+        } else {
+            listOf(apiKeyDone, micDone, overlayDone, accessibilityDone)
+        }
+        val doneCount = steps.count { it }
+
+        setStepIcon(binding.iconSetupApiKey, apiKeyDone)
+        setStepIcon(binding.iconSetupMic, micDone)
+        setStepIcon(binding.iconSetupNotifications, notificationsDone)
+        setStepIcon(binding.iconSetupOverlay, overlayDone)
+        setStepIcon(binding.iconSetupAccessibility, accessibilityDone)
+        binding.btnSetupApiKey.visibility = stepVisibility(apiKeyDone)
+        binding.btnSetupMic.visibility = stepVisibility(micDone)
+        binding.btnSetupNotifications.visibility = stepVisibility(notificationsDone)
+        binding.btnSetupOverlay.visibility = stepVisibility(overlayDone)
+        binding.btnSetupAccessibility.visibility = stepVisibility(accessibilityDone)
+        binding.btnGetGroqKey.visibility = stepVisibility(apiKeyDone)
+        val restrictedApplicable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+        binding.btnRestrictedSettings.visibility =
+            if (restrictedApplicable && !accessibilityDone) View.VISIBLE else View.GONE
+
+        binding.textSetupProgress.text = getString(R.string.setup_progress, doneCount, steps.size)
+        binding.progressSetup.max = steps.size
+        binding.progressSetup.setProgressCompat(doneCount, true)
+
+        val complete = doneCount == steps.size
+        binding.cardSetup.visibility = if (complete) View.GONE else View.VISIBLE
+        val wasComplete = setupWasComplete
+        setupWasComplete = complete
+        // Only auto-start on a transition inside this screen, never on a plain launch.
+        if (wasComplete == false && complete) {
+            save()
+            if (!isBubbleRunning()) FloatingBubbleService.start(this)
+            binding.btnToggleBubble.postDelayed({ refreshBubbleButton() }, 250)
+            toast(getString(R.string.setup_complete_toast))
+        }
+    }
+
+    private fun setStepIcon(icon: ImageView, done: Boolean) {
+        icon.setImageResource(
+            if (done) R.drawable.ic_setup_check_circle else R.drawable.ic_setup_circle
         )
-        binding.btnPermissionNotification.setIconResource(
-            if (hasNotificationPermission()) android.R.drawable.checkbox_on_background
-            else android.R.drawable.checkbox_off_background
-        )
-        binding.btnPermissionOverlay.setIconResource(
-            if (canDrawOverlays()) android.R.drawable.checkbox_on_background
-            else android.R.drawable.checkbox_off_background
-        )
-        binding.btnPermissionAccessibility.setIconResource(
-            if (FocusAccessibilityService.isEnabled()) android.R.drawable.checkbox_on_background
-            else android.R.drawable.checkbox_off_background
-        )
+        val attr = if (done) {
+            androidx.appcompat.R.attr.colorPrimary
+        } else {
+            com.google.android.material.R.attr.colorOutline
+        }
+        icon.imageTintList = ColorStateList.valueOf(MaterialColors.getColor(icon, attr))
+    }
+
+    private fun stepVisibility(done: Boolean): Int =
+        if (done) View.GONE else View.VISIBLE
+
+    private fun firstPendingStep(): String? {
+        if (binding.inputApiKey.text.isNullOrBlank()) {
+            return getString(R.string.setup_step_api_key_title)
+        }
+        if (!hasMicPermission()) return getString(R.string.setup_step_mic_title)
+        if (!hasNotificationPermission()) return getString(R.string.setup_step_notifications_title)
+        if (!canDrawOverlays()) return getString(R.string.setup_step_overlay_title)
+        if (!isAccessibilityEnabled()) return getString(R.string.setup_step_accessibility_title)
+        return null
     }
 
     private fun refreshBubbleButton() {
+        val running = isBubbleRunning()
         binding.btnToggleBubble.setText(
-            if (isBubbleRunning()) R.string.stop_bubble else R.string.start_bubble
+            if (running) R.string.turn_off_voicey else R.string.turn_on_voicey
+        )
+        binding.textBubbleStatus.setText(
+            if (running) R.string.bubble_status_on else R.string.bubble_status_off
         )
     }
 
@@ -426,9 +541,15 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun canDrawOverlays(): Boolean = AndroidSettings.canDrawOverlays(this)
 
-    private fun canRunBubble(): Boolean =
-        hasMicPermission() && hasNotificationPermission() &&
-            canDrawOverlays() && FocusAccessibilityService.isEnabled()
+    private fun isAccessibilityEnabled(): Boolean {
+        if (FocusAccessibilityService.isEnabled()) return true
+        val component = ComponentName(this, FocusAccessibilityService::class.java)
+        val enabled = AndroidSettings.Secure.getString(
+            contentResolver,
+            AndroidSettings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+        ).orEmpty()
+        return enabled.split(':').any { ComponentName.unflattenFromString(it) == component }
+    }
 
     @Suppress("DEPRECATION")
     private fun isBubbleRunning(): Boolean {
@@ -439,6 +560,10 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun toast(message: String) {
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+    }
+
+    private fun longToast(message: String) {
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
     }
 
     /**

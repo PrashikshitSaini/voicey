@@ -29,6 +29,8 @@ class FocusAccessibilityService : AccessibilityService() {
         instance = this
         try {
             refreshKeyboardState()
+            // Tell the bubble service even if keyboard state didn't change.
+            notifyListener(force = true)
         } catch (_: RuntimeException) {
             // A crash in an accessibility callback kills the whole app process.
         }
@@ -40,6 +42,7 @@ class FocusAccessibilityService : AccessibilityService() {
         // doesn't stay stranded on screen (its service falls back to always-visible
         // mode on its own when it sees isEnabled() == false).
         updateKeyboardState(visible = false, top = NO_KEYBOARD_TOP)
+        notifyListener(force = true)
         super.onDestroy()
     }
 

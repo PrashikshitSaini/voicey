@@ -7,7 +7,7 @@
     <string name="settings_title">Voicey</string>
     <string name="settings_blurb">Free, open-source AI dictation. Bring your own API key.</string>
     <string name="settings_hero_badge">PRIVATE · YOUR API · NO SUBSCRIPTION</string>
-    <string name="section_permissions">Get started</string>
+    <string name="section_microphone">Microphone</string>
     <string name="section_ai">AI provider</string>
     <string name="section_language_dictionary">Language &amp; dictionary</string>
     <string name="section_experience">Experience</string>
@@ -15,7 +15,7 @@
     <string name="microphone_label">Microphone input</string>
     <string name="microphone_hint">Choose an input</string>
     <string name="microphone_helper">Automatic uses your headset mic whenever one is connected, otherwise the phone mic.</string>
-    <string name="microphone_automatic">Automatic (headset when connected)</string>
+    <string name="microphone_automatic">Automatic</string>
     <string name="microphone_phone">Phone microphone</string>
     <string name="microphone_saved_disconnected">Saved headset (not connected)</string>
 
@@ -41,7 +41,7 @@
     <string name="hold_to_talk_label">Hold to talk (release to stop)</string>
     <string name="show_only_while_typing_label">Show pill only while typing</string>
     <string name="compact_bubble_label">Compact bubble</string>
-    <string name="compact_bubble_helper">Use a 48dp icon-only bubble that snaps to the nearest screen edge.</string>
+    <string name="compact_bubble_helper">An icon-only button that snaps to the nearest screen edge.</string>
     <string name="sound_feedback_label">Sound on record start/stop</string>
     <string name="live_draft_preview_label">Live draft preview</string>
     <string name="live_draft_preview_helper">Shows a temporary draft while you speak. Voicey sends extra short transcription requests to your configured provider, which may use more data and API quota. Draft text can change, is never pasted, and is cleared when dictation ends.</string>
@@ -100,21 +100,48 @@
     <string name="live_draft_listening">Listening…</string>
     <string name="live_draft_may_change">Draft · may change</string>
 
-    <string name="permission_overlay_button">Grant overlay permission</string>
-    <string name="permission_accessibility_button">Enable accessibility service</string>
-    <string name="permission_mic_button">Grant microphone permission</string>
-    <string name="permission_notification_button">Grant notification permission</string>
+    <string name="setup_title">Set up Voicey</string>
+    <string name="setup_progress">%1$d of %2$d done</string>
+
+    <string name="setup_step_api_key_title">Add your API key</string>
+    <string name="setup_step_api_key_reason">Groq has a free tier.</string>
+    <string name="setup_add">Add</string>
+    <string name="setup_get_groq_key">Get a free Groq key</string>
+
+    <string name="setup_step_mic_title">Microphone</string>
+    <string name="setup_step_mic_reason">To hear your dictation.</string>
+
+    <string name="setup_step_notifications_title">Notifications</string>
+    <string name="setup_step_notifications_reason">Android requires it to keep Voicey running.</string>
+
+    <string name="setup_step_overlay_title">Display over other apps</string>
+    <string name="setup_step_overlay_reason">Shows the mic button above your keyboard.</string>
+
+    <string name="setup_step_accessibility_title">Accessibility</string>
+    <string name="setup_step_accessibility_reason">Finds the text field you’re typing in. Voicey reads only that field.</string>
+
+    <string name="setup_allow">Allow</string>
+    <string name="setup_turn_on">Turn on</string>
+    <string name="setup_restricted_settings">Switch greyed out? Allow restricted settings</string>
+    <string name="setup_accessibility_toast">Tap “Installed apps” → Voicey → turn it on</string>
+    <string name="setup_restricted_toast">Tap ⋮ (top right) → Allow restricted settings, then come back</string>
+    <string name="setup_finish_first">Finish setup first: %1$s</string>
+    <string name="setup_complete_toast">Voicey is on. Tap any text field to try it.</string>
+    <string name="setup_permanently_denied">Allow it under Permissions</string>
+
+    <string name="turn_on_voicey">Turn on Voicey</string>
+    <string name="turn_off_voicey">Turn off Voicey</string>
+    <string name="bubble_status_on">Voicey is on. The mic appears when you tap a text field.</string>
+    <string name="bubble_status_off">Voicey is off.</string>
+
+    <string name="section_advanced">Advanced</string>
+
     <string name="start_bubble">Start bubble</string>
     <string name="stop_bubble">Stop bubble</string>
 
     <string name="notification_channel_name">Voicey bubble</string>
     <string name="notification_title">Voicey is listening</string>
     <string name="notification_text">Tap the bubble to dictate.</string>
-
-    <string name="restricted_settings_title">Android 13+ extra step</string>
-    <string name="restricted_settings_message">Android blocks sideloaded apps from enabling Accessibility by default. To unblock Voicey:\n\n1. Tap \"Open App Info\" below.\n2. On the App Info screen, tap the ⋮ menu at the top right.\n3. Tap \"Allow restricted settings\".\n4. Return here and tap \"Go to Accessibility settings\".\n\nIf you have already done this, just tap \"Go to Accessibility settings\".</string>
-    <string name="restricted_settings_open_app_info">Open App Info</string>
-    <string name="restricted_settings_go_to_accessibility">Go to Accessibility settings</string>
 
     <string name="reset_defaults_button">Reset models &amp; prompts to defaults</string>
     <string name="reset_dialog_title">Reset to defaults?</string>

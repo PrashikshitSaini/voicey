@@ -1,5 +1,6 @@
 package dev.prashikshit.voicey.service
 
+import android.animation.ValueAnimator
 import android.app.AlarmManager
 import android.app.Notification
 import android.app.PendingIntent
@@ -8,6 +9,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.content.res.Configuration
 import android.graphics.PixelFormat
+import android.graphics.drawable.Drawable
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -16,6 +18,7 @@ import android.text.SpannableStringBuilder
 import android.text.style.ForegroundColorSpan
 import android.view.ContextThemeWrapper
 import android.view.Gravity
+import android.view.HapticFeedbackConstants
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
@@ -28,6 +31,7 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.ColorUtils
 import androidx.lifecycle.LifecycleService
@@ -111,6 +115,15 @@ class FloatingBubbleService : LifecycleService() {
     /** Null when the user has disabled sound feedback in settings. */
     private var soundFeedback: SoundFeedback? = null
 
+    /** Tinted in place so state changes can animate instead of swapping drawables. */
+    private var bubbleBackground: Drawable? = null
+    private var colorAnimator: ValueAnimator? = null
+    private var currentBubbleColor: Int = 0
+
+    /** Last accessibility state reflected in the notification; null until first read. */
+    private var notifiedAccessibilityEnabled: Boolean? = null
+    private var warnedAccessibilityOff = false
+
     /** Last keyboard state delivered by the accessibility service. Main thread only. */
     private var keyboardWantsBubble = false
     private var lastKeyboardTop = FocusAccessibilityService.NO_KEYBOARD_TOP
@@ -128,6 +141,7 @@ class FloatingBubbleService : LifecycleService() {
             stopSelf()
             return
         }
+        notifiedAccessibilityEnabled = FocusAccessibilityService.isEnabled()
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         injector = TextInjector(this)
         pipeline = Pipeline(
@@ -185,6 +199,8 @@ class FloatingBubbleService : LifecycleService() {
 
     override fun onDestroy() {
         shuttingDown = true
+        colorAnimator?.cancel()
+        colorAnimator = null
         if (::pipeline.isInitialized) pipeline.shutdown()
         CorrectionLearner.setFeedbackListener(null)
         FocusAccessibilityService.setKeyboardListener(null)
@@ -310,9 +326,21 @@ class FloatingBubbleService : LifecycleService() {
         val stopIntent = Intent(this, FloatingBubbleService::class.java).apply { action = ACTION_STOP }
         val stopPendingIntent = PendingIntent.getService(this, 1, stopIntent, pendingFlags)
 
+        val accessibilityOn = FocusAccessibilityService.isEnabled()
+        val titleRes = if (accessibilityOn) {
+            R.string.notification_title
+        } else {
+            R.string.notification_accessibility_off_title
+        }
+        val textRes = if (accessibilityOn) {
+            R.string.notification_text
+        } else {
+            R.string.notification_accessibility_off_text
+        }
+
         return NotificationCompat.Builder(this, VoiceyApp.NOTIFICATION_CHANNEL_ID)
-            .setContentTitle(getString(R.string.notification_title))
-            .setContentText(getString(R.string.notification_text))
+            .setContentTitle(getString(titleRes))
+            .setContentText(getString(textRes))
             .setSmallIcon(R.drawable.ic_mic)
             .setContentIntent(contentPendingIntent)
             .addAction(0, getString(R.string.stop_bubble), stopPendingIntent)
@@ -331,6 +359,11 @@ class FloatingBubbleService : LifecycleService() {
         liveDraftContent = bubbleView.findViewById(R.id.live_draft_content)
         liveDraftStatus = bubbleView.findViewById(R.id.live_draft_status)
         liveDraftText = bubbleView.findViewById(R.id.live_draft_text)
+        // One mutated drawable, tinted in place, so colour changes can animate.
+        currentBubbleColor = ContextCompat.getColor(this, R.color.bubble_idle)
+        bubbleBackground = ContextCompat.getDrawable(this, R.drawable.bubble_background)?.mutate()
+        bubbleBackground?.setTint(currentBubbleColor)
+        bubbleView.background = bubbleBackground
         if (compactBubbleEnabled) configureCompactLayout()
 
         val overlayType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -392,6 +425,7 @@ class FloatingBubbleService : LifecycleService() {
     /** Called on the main thread by FocusAccessibilityService for keyboard/focus changes. */
     private fun onKeyboardStateChanged(shouldShow: Boolean, keyboardTop: Int) {
         if (shuttingDown) return
+        refreshAccessibilityNotice()
         val keyboardChanged = keyboardWantsBubble != shouldShow || lastKeyboardTop != keyboardTop
         keyboardWantsBubble = shouldShow
         lastKeyboardTop = keyboardTop
@@ -537,6 +571,7 @@ class FloatingBubbleService : LifecycleService() {
         if (pipeline_isRecording()) {
             pipeline.stopAndProcess()
         } else {
+            warnIfAccessibilityOff()
             pipeline.startRecording()
         }
     }
@@ -551,6 +586,7 @@ class FloatingBubbleService : LifecycleService() {
 
     private fun startHoldToTalk() {
         isLongPressing = true
+        warnIfAccessibilityOff()
         pipeline.startRecording()
     }
 
@@ -568,8 +604,10 @@ class FloatingBubbleService : LifecycleService() {
             if (shuttingDown || !::bubbleView.isInitialized || !bubbleView.isAttachedToWindow) return@post
             if (state == Pipeline.State.RECORDING && previousState != Pipeline.State.RECORDING) {
                 soundFeedback?.playStart()
+                performHaptic()
             } else if (state != Pipeline.State.RECORDING && previousState == Pipeline.State.RECORDING) {
                 soundFeedback?.playStop()
+                performHaptic()
             }
 
             val colorRes = when (state) {
@@ -578,9 +616,7 @@ class FloatingBubbleService : LifecycleService() {
                 Pipeline.State.PROCESSING -> R.color.bubble_processing
                 Pipeline.State.ERROR -> R.color.bubble_recording
             }
-            val background = ContextCompat.getDrawable(this, R.drawable.bubble_background)?.mutate()
-            background?.setTint(ContextCompat.getColor(this, colorRes))
-            bubbleView.background = background
+            animateBubbleColor(ContextCompat.getColor(this, colorRes))
 
             if (compactBubbleEnabled) {
                 bubbleDiscard.visibility = View.GONE
@@ -631,6 +667,51 @@ class FloatingBubbleService : LifecycleService() {
             // (pill stayed pinned) and the pipeline just returned to IDLE — hide now.
             applyBubbleVisibility()
         }
+    }
+
+    private fun animateBubbleColor(target: Int) {
+        if (target == currentBubbleColor) return
+        val from = currentBubbleColor
+        currentBubbleColor = target
+        colorAnimator?.cancel()
+        val drawable = bubbleBackground ?: return
+        colorAnimator = ValueAnimator.ofArgb(from, target).apply {
+            duration = COLOR_TRANSITION_MS
+            addUpdateListener { drawable.setTint(it.animatedValue as Int) }
+            start()
+        }
+    }
+
+    private fun performHaptic() {
+        try {
+            bubbleView.performHapticFeedback(
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    HapticFeedbackConstants.CONFIRM
+                } else {
+                    HapticFeedbackConstants.VIRTUAL_KEY
+                }
+            )
+        } catch (_: RuntimeException) {
+            // Haptics are best-effort.
+        }
+    }
+
+    private fun refreshAccessibilityNotice() {
+        val enabled = FocusAccessibilityService.isEnabled()
+        if (enabled == notifiedAccessibilityEnabled) return
+        notifiedAccessibilityEnabled = enabled
+        try {
+            NotificationManagerCompat.from(this)
+                .notify(VoiceyApp.NOTIFICATION_ID, buildNotification())
+        } catch (_: SecurityException) {
+            // POST_NOTIFICATIONS may have been revoked.
+        }
+    }
+
+    private fun warnIfAccessibilityOff() {
+        if (warnedAccessibilityOff || FocusAccessibilityService.isEnabled()) return
+        warnedAccessibilityOff = true
+        showTransientMessage(getString(R.string.bubble_accessibility_off_hint))
     }
 
     /** Forwards the mic level to the spectrum. Called on the recorder's capture thread. */
@@ -883,6 +964,7 @@ class FloatingBubbleService : LifecycleService() {
     /** Drops the microphone foreground claim only after Recorder's worker has exited. */
     private fun finishRecording() {
         if (shuttingDown) return
+        refreshAccessibilityNotice()
         try {
             startInForeground(includeMicrophone = false)
         } catch (_: RuntimeException) {
@@ -907,6 +989,7 @@ class FloatingBubbleService : LifecycleService() {
         private const val PILL_KEYBOARD_MARGIN_DP = 12
         private const val FALLBACK_BOTTOM_MARGIN_DP = 120
         private const val FADE_MS = 150L
+        private const val COLOR_TRANSITION_MS = 180L
         private const val LEARNING_CARD_WIDTH_DP = 320
         private const val LEARNING_CARD_OFFSET_DP = 84
         private const val LEARNING_CARD_DURATION_MS = 7_000L

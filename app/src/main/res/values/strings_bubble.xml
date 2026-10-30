@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="notification_accessibility_off_title">Voicey can\'t type right now</string>
+    <string name="notification_accessibility_off_text">Accessibility was turned off. Tap to turn it back on.</string>
+    <string name="bubble_accessibility_off_hint">Accessibility is off — Voicey can\'t insert text. Open Voicey to fix.</string>
+</resources>
