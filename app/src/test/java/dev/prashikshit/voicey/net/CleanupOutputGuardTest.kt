@@ -68,6 +68,25 @@ KNOWN_CORRECTIONS (the user previously fixed these transcription mistakes)"""
     }
 
     @Test
+    fun rejectsTheFormattingExamplesWordsWhenTheyWereNeverSpoken() {
+        val raw = "hi priya can we meet on friday"
+        val leaked = "Hi Priya,\n\nA few things for Friday:\n\n- Confirm the venue\n" +
+            "- Send the agenda to the team\n- Book a cab\n\nThanks,"
+
+        assertEquals(raw, CleanupOutputGuard.safeText(leaked, raw))
+    }
+
+    @Test
+    fun keepsExampleWordsThatWereActuallySpoken() {
+        val raw = "hi priya a few things for friday first confirm the venue second send " +
+            "the agenda to the team and finally book a cab thanks"
+        val cleaned = "Hi Priya,\n\nA few things for Friday:\n\n- Confirm the venue\n" +
+            "- Send the agenda to the team\n- Book a cab\n\nThanks,"
+
+        assertEquals(cleaned, CleanupOutputGuard.safeText(cleaned, raw))
+    }
+
+    @Test
     fun preservesNormalCleanedTranscript() {
         val cleaned = "This is the polished transcription."
 

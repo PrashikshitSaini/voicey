@@ -11,10 +11,30 @@ internal object CleanupOutputGuard {
      */
     fun safeText(candidate: String, rawTranscript: String, context: CleanupContext = CleanupContext.EMPTY): String {
         val cleaned = candidate.trim()
-        return if (containsInternalScaffolding(cleaned) || repeatsFieldContext(cleaned, rawTranscript, context)) {
+        return if (containsInternalScaffolding(cleaned) ||
+            repeatsFieldContext(cleaned, rawTranscript, context) ||
+            echoesFormattingExample(cleaned, rawTranscript)
+        ) {
             rawTranscript.trim()
         } else cleaned
     }
+
+    /** A small model sometimes copies the formatting policy's example list instead of the dictation. */
+    private fun echoesFormattingExample(candidate: String, raw: String): Boolean {
+        val output = normalizedWords(candidate)
+        val spoken = normalizedWords(raw)
+        return EXAMPLE_PHRASES.any { phrase ->
+            val window = " $phrase "
+            output.contains(window) && !spoken.contains(window)
+        }
+    }
+
+    private val EXAMPLE_PHRASES = listOf(
+        "confirm the venue",
+        "send the agenda to the team",
+        "book a cab",
+        "a few things for friday",
+    )
 
     private fun repeatsFieldContext(candidate: String, raw: String, context: CleanupContext): Boolean {
         val output = normalizedWords(candidate)

@@ -11,11 +11,20 @@ internal object AppAwareOutputFormatter {
         if (!enabled) return text
 
         var result = text
-        if (AppFormattingGuide.categoryFor(context.app) == AppFormattingGuide.Category.EMAIL &&
+        val category = AppFormattingGuide.categoryFor(context.app)
+        if (category == AppFormattingGuide.Category.EMAIL &&
             !context.fieldKind.isNonBodyField() &&
             !isSingleLineEmailField(context.fieldHint)
         ) {
             result = applyEmailStructure(result)
+        }
+        // Body-shaped surfaces get one deterministic rescue when the model returns
+        // a spoken enumeration as a single paragraph.
+        if (category != AppFormattingGuide.Category.MESSAGING &&
+            category != AppFormattingGuide.Category.SOCIAL &&
+            (context.fieldKind == FieldKind.MULTI_LINE || context.fieldKind == FieldKind.UNKNOWN)
+        ) {
+            result = listifyCountedRun(result)
         }
         if (!context.fieldKind.isSingleLineField()) return result
 
@@ -57,6 +66,58 @@ internal object AppAwareOutputFormatter {
         }
 
         return result
+    }
+
+    /**
+     * Turns a spoken enumeration ("First, X. Second, Y. Finally, Z.") into a real
+     * bullet list. Only a lead ordinal plus at least one follow-up ordinal counts,
+     * so ordinary prose that happens to start with "First" stays untouched.
+     */
+    private fun listifyCountedRun(text: String): String {
+        if (HAS_LIST_LINE.containsMatchIn(text)) return text
+        return text.split(PARAGRAPH_BREAK).joinToString("\n\n") { listifyParagraph(it) }
+    }
+
+    private fun listifyParagraph(paragraph: String): String {
+        val sentences = SENTENCE_BREAK.split(paragraph)
+        val start = sentences.indexOfFirst { FIRST_ORDINAL.containsMatchIn(it) }
+        if (start < 0) return paragraph
+
+        var end = start
+        for (index in start + 1 until sentences.size) {
+            val sentence = sentences[index]
+            if (!CONTINUATION.containsMatchIn(sentence)) break
+            end = index
+            if (FINAL_ORDINAL.containsMatchIn(sentence)) break
+        }
+        if (end == start) return paragraph
+
+        // A two-sentence run is usually narrative prose ("First we tried it. Then it worked.").
+        val run = sentences.subList(start, end + 1)
+        if (run.size < 3 && run.none { STRONG_CONTINUATION.containsMatchIn(it) }) return paragraph
+
+        // The sentence introducing the run carries the list's colon.
+        val lead = sentences.take(start).joinToString(" ")
+            .let { if (it.endsWith(".")) it.dropLast(1) + ":" else it }
+        val items = run.map { item(it) }
+        val rest = sentences.drop(end + 1).joinToString(" ")
+
+        return buildString {
+            if (lead.isNotEmpty()) append(lead).append("\n\n")
+            items.forEachIndexed { index, line ->
+                if (index > 0) append("\n")
+                append("- ").append(line)
+            }
+            if (rest.isNotEmpty()) append("\n\n").append(rest)
+        }
+    }
+
+    private fun item(sentence: String): String {
+        val stripped = sentence.replaceFirst(ORDINAL_PREFIX, "").trim()
+        val capitalised = stripped.replaceFirstChar {
+            if (it.isLowerCase()) it.titlecase() else it.toString()
+        }
+        return if (capitalised.endsWith(".")) capitalised.dropLast(1) else capitalised
     }
 
     /** Fields that are definitely never an email body, even inside an email app. */
@@ -103,6 +164,18 @@ internal object AppAwareOutputFormatter {
     )
 
     private val LIST_MARKER = Regex("""^(?:[-•*]|\d+[.)])\s+""")
+    private val HAS_LIST_LINE = Regex("""(?m)^[ \t]*(?:[-•*]|\d+\.)\s""")
+    private val PARAGRAPH_BREAK = Regex("""\n\s*\n""")
+    private val SENTENCE_BREAK = Regex("""(?<=[.!?])\s+""")
+    private val FIRST_ORDINAL = Regex("""(?i)^(?:firstly\b|first(?: of all)?[, ]|number one\b|one,)""")
+    private val CONTINUATION = Regex(
+        """(?i)^(?:(?:second|third|fourth|fifth)(?:ly)?[, ]|next[, ]|then[, ]|also[, ]|after that\b|finally\b|lastly\b|number (?:two|three|four|five)\b)"""
+    )
+    private val FINAL_ORDINAL = Regex("""(?i)^(?:finally|lastly)\b""")
+    private val STRONG_CONTINUATION = Regex("""(?i)^(?:second(?:ly)?\b|finally\b|lastly\b|number two\b)""")
+    private val ORDINAL_PREFIX = Regex(
+        """(?i)^(?:(?:first|second|third|fourth|fifth)(?:ly)?|number (?:one|two|three|four|five)|one|next|then|also|after that|finally|lastly)(?: of all)?\s*,?\s*"""
+    )
     private val WHITESPACE = Regex("""\s+""")
     private val EMAIL_ADDRESS = Regex("""^[^@\s]+@[^@\s]+\.[^@\s]+$""")
 

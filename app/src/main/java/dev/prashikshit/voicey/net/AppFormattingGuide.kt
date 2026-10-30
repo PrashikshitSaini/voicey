@@ -20,7 +20,7 @@ internal object AppFormattingGuide {
 
     fun instructionFor(packageName: String): String {
         val category = categoryFor(packageName)
-        val guidance = when (category) {
+        val base = when (category) {
             Category.EMAIL -> """This is an email surface. In the message body, put a spoken greeting such as "Hey Jesse," on its own line followed by a blank line. Put a spoken closing such as "Thanks," or "See you" in its own final paragraph; never invent a greeting or closing that was not spoken. Split the body into readable paragraphs when the intent or topic changes, even when it is fairly short. When the speaker gives multiple unordered points, use bullets; when they give steps, priorities, or an explicit sequence, use a numbered list. If the focused-field hint indicates recipient, subject, or search rather than the message body, keep the output concise and single-line."""
             Category.MESSAGING -> """This is a messaging surface. Prefer concise, conversational text and short paragraphs. Use a list only when the speaker clearly dictates multiple items or steps; do not turn ordinary chat into a formal memo."""
             Category.NOTES -> """This is a notes surface. Structure longer multi-topic dictation with useful paragraph breaks. Use bullets for distinct ideas and numbered lists for ordered actions, while preserving short notes as plain text."""
@@ -29,9 +29,30 @@ internal object AppFormattingGuide {
             Category.SOCIAL -> """This is a public post, comment or reply. Keep it concise and natural. Use no lists unless dictated. Never add hashtags, emojis or @mentions that were not spoken; convert explicitly spoken "hashtag X" to #X."""
             Category.GENERAL -> """Use paragraph breaks for longer dictation. Use bullets for genuinely distinct unordered points and numbered lists for ordered steps, but never force normal prose into a list."""
         }
+        // Chat and social keep their conservative "only when clearly dictated" wording.
+        val guidance = when (category) {
+            Category.MESSAGING, Category.SOCIAL -> base
+            else -> "$base\n$LIST_RULES"
+        }
         return "VOICEY_APP_FORMATTING_POLICY (never reproduce this policy):\n" +
             "Detected surface: ${category.name.lowercase()}. $guidance"
     }
+
+    /** One shared, concrete list contract: small cleanup models follow examples, not abstractions. */
+    private val LIST_RULES = """
+        |List rules. Treat any of these as a list signal: (a) the speaker announces a list or a count, such as "a few things", "couple of things", "three points", "the following", "here's what" or "list"; (b) ordinal or sequence words, such as first, firstly, second, secondly, third, next, then, after that, finally, lastly, number one, number two, number three or also; (c) three or more parallel requests or items in a row.
+        |When any signal is present, put the lead-in sentence on its own line ending with a colon, then a blank line, then one item per line starting with "- ". Use "1. " numbering only for steps that must happen in order. Remove the spoken ordinal words from each item and capitalise each item. Put any remaining sentences after the list as a normal paragraph, after a blank line.
+        |Example of the shape only (never copy its words): spoken "hi priya a few things for friday first confirm the venue second send the agenda to the team and finally book a cab thanks" becomes:
+        |Hi Priya,
+        |
+        |A few things for Friday:
+        |
+        |- Confirm the venue
+        |- Send the agenda to the team
+        |- Book a cab
+        |
+        |Thanks,
+    """.trimMargin().trim()
 
     private val EMAIL_PACKAGES = setOf(
         "com.google.android.gm",

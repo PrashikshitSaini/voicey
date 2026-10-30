@@ -1,6 +1,7 @@
 package dev.prashikshit.voicey.net
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -39,6 +40,47 @@ class AppFormattingGuideTest {
         assertTrue(policy.contains("spoken greeting"))
         assertTrue(policy.contains("blank line"))
         assertTrue(policy.contains("never invent a greeting or closing"))
+    }
+
+    @Test
+    fun concreteListRulesAreSharedWithBodySurfaces() {
+        listOf(
+            "com.google.android.gm",
+            "com.google.android.keep",
+            "com.google.android.apps.docs.editors.docs",
+            "com.openai.chatgpt",
+            "com.example.editor",
+        ).forEach {
+            val policy = AppFormattingGuide.instructionFor(it)
+            assertTrue("$it needs list signals", policy.contains("\"a few things\""))
+            assertTrue("$it needs ordinal signals", policy.contains("first, firstly, second"))
+            assertTrue(
+                "$it needs the colon-then-blank-line rule",
+                policy.contains("blank line, then one item per line starting with \"- \""),
+            )
+            assertTrue(
+                "$it needs the one compact example",
+                policy.contains(
+                    "Example of the shape only (never copy its words):",
+                ) && policy.contains(
+                    "Hi Priya,\n\nA few things for Friday:\n\n- Confirm the venue\n" +
+                        "- Send the agenda to the team\n- Book a cab\n\nThanks,",
+                ),
+            )
+        }
+    }
+
+    @Test
+    fun messagingAndSocialKeepTheirConservativeListWording() {
+        val messaging = AppFormattingGuide.instructionFor("com.whatsapp")
+        val social = AppFormattingGuide.instructionFor("com.twitter.android")
+
+        assertTrue(messaging.contains("only when the speaker clearly dictates multiple items"))
+        assertTrue(social.contains("Use no lists unless dictated"))
+        listOf(messaging, social).forEach {
+            assertFalse(it.contains("Example of the shape only"))
+            assertFalse(it.contains("a few things"))
+        }
     }
 
     @Test
