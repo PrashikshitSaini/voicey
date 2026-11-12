@@ -518,7 +518,9 @@ class Pipeline(
     private companion object {
         const val MIN_AUDIO_BYTES = 4_096L
         const val ERROR_AUTO_CLEAR_MS = 2_000L
-        const val STOP_TIMEOUT_MS = 1_000L
+        // LE Audio headsets can take over a second to release the mic; the wait is off the
+        // UI thread and only bounds how long a truly stuck driver blocks the next dictation.
+        const val STOP_TIMEOUT_MS = 3_000L
         /** gpt-oss-20b at low reasoning effort normally answers in well under a second on Groq. */
         const val CLEANUP_DEADLINE_MS = 5_000L
     }

@@ -609,6 +609,9 @@ class FloatingBubbleService : LifecycleService() {
     /** Main thread: true once the current recording's microphone delivers real sound. */
     private var micLive = false
 
+    /** Main thread: play the stop chime once the microphone has actually been released. */
+    private var stopCuePending = false
+
     private fun renderState(state: Pipeline.State) {
         if (shuttingDown) return
         val previousState = currentState
@@ -621,7 +624,10 @@ class FloatingBubbleService : LifecycleService() {
                 // come up, and words spoken after an early chime were being lost.
                 micLive = false
             } else if (state != Pipeline.State.RECORDING && previousState == Pipeline.State.RECORDING) {
-                if (micLive) soundFeedback?.playStop()
+                // Stop chime waits for finishRecording(): on LE Audio buds, playing it while the
+                // mic is stopping makes Android reroute audio first and AudioRecord.stop() took
+                // 1.1 s (measured on Buds4 Pro), long enough to trip the stuck-mic timeout.
+                stopCuePending = micLive
                 performHaptic()
                 micLive = false
             }
@@ -1003,6 +1009,10 @@ class FloatingBubbleService : LifecycleService() {
     /** Drops the microphone foreground claim only after Recorder's worker has exited. */
     private fun finishRecording() {
         if (shuttingDown) return
+        if (stopCuePending) {
+            stopCuePending = false
+            soundFeedback?.playStop()
+        }
         refreshAccessibilityNotice()
         try {
             startInForeground(includeMicrophone = false)
