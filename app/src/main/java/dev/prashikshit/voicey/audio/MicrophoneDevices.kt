@@ -37,17 +37,20 @@ object MicrophoneDevices {
         val inputs = audioManager.getDevices(AudioManager.GET_DEVICES_INPUTS)
             .filter { it.isSource && it.type in externalTypes }
         // Communication routing accepts output endpoints; Android selects their matching mic.
-        // LE Audio buds (e.g. Galaxy Buds4 Pro) also expose the classic call (SCO) link, which
-        // is phone-call quality. LE Audio is listed first so the same headset resolves to it.
+        // LE Audio buds (e.g. Galaxy Buds4 Pro) expose both an LE Audio and a classic call (SCO)
+        // link. Measured on an S25+ with Buds4 Pro, SCO started faster (0.5 s vs 1.3 s), kept the
+        // buds' own call noise reduction, and transcribed better in crowd noise; LE Audio also
+        // re-negotiated mid-recording and dropped ~0.8 s of audio. SCO is preferred when offered;
+        // LE-only headsets still use LE Audio.
         val devices = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             inputs.filterNot(::isBluetooth) + audioManager.availableCommunicationDevices
                 .filter(::isBluetooth)
-                .sortedBy { if (it.type == AudioDeviceInfo.TYPE_BLE_HEADSET) 0 else 1 }
+                .sortedBy { if (it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) 0 else 1 }
         } else inputs
         return devices
             .distinctBy {
                 when {
-                    isBluetooth(it) -> stableKey(it) // one entry per headset, LE Audio kept
+                    isBluetooth(it) -> stableKey(it) // one entry per headset, SCO kept
                     it.type in usbTypes -> "usb:${deviceName(it)}"
                     else -> "${it.type}:${deviceName(it)}"
                 }
