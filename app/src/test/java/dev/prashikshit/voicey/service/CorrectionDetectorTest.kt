@@ -20,15 +20,41 @@ class CorrectionDetectorTest {
     }
 
     @Test
-    fun noLongerRejectsAReplacementBecauseSpellingIsDissimilar() {
-        assertEquals(
-            listOf(Correction("meeting", "call")),
+    fun rewordingIsNotLearnedAsATranscriptionMistake() {
+        assertTrue(
             CorrectionDetector.detect(
                 original = "Schedule the meeting tomorrow",
                 final = "Schedule the call tomorrow",
                 learnableTokens = setOf("schedule", "the", "meeting", "tomorrow"),
-            ),
+            ).isEmpty()
         )
+        assertTrue(
+            CorrectionDetector.detect(
+                original = "See you tomorrow",
+                final = "See you today",
+                learnableTokens = setOf("see", "you", "tomorrow"),
+            ).isEmpty()
+        )
+    }
+
+    @Test
+    fun everydayWordSwapsAreNotLearned() {
+        // Correct in one sentence, wrong in the next: replaying it globally corrupts dictation.
+        assertTrue(
+            CorrectionDetector.detect(
+                original = "I left there car outside",
+                final = "I left their car outside",
+                learnableTokens = setOf("i", "left", "there", "car", "outside"),
+            ).isEmpty()
+        )
+    }
+
+    @Test
+    fun learnsMisheardNamesCasingAndClippedNames() {
+        assertTrue(CorrectionDetector.looksLikeMisrecognition(listOf("Voice", "e"), listOf("Voicey")))
+        assertTrue(CorrectionDetector.looksLikeMisrecognition(listOf("iphone"), listOf("iPhone")))
+        assertTrue(CorrectionDetector.looksLikeMisrecognition(listOf("Prash"), listOf("Prashikshit")))
+        assertTrue(CorrectionDetector.looksLikeMisrecognition(listOf("Grok"), listOf("Groq")))
     }
 
     @Test

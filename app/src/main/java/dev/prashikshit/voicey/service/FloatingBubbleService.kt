@@ -153,6 +153,7 @@ class FloatingBubbleService : LifecycleService() {
             onLiveDraftChanged = ::renderLiveDraft,
             onRecordingStarting = ::prepareRecording,
             onRecordingStopped = ::finishRecording,
+            onCaptureLive = ::onMicLive,
         )
         val settings = try {
             Settings.load(this)
@@ -605,6 +606,9 @@ class FloatingBubbleService : LifecycleService() {
     @Volatile
     private var currentState: Pipeline.State = Pipeline.State.IDLE
 
+    /** Main thread: true once the current recording's microphone delivers real sound. */
+    private var micLive = false
+
     private fun renderState(state: Pipeline.State) {
         if (shuttingDown) return
         val previousState = currentState
@@ -613,11 +617,13 @@ class FloatingBubbleService : LifecycleService() {
         mainHandler.post {
             if (shuttingDown || !::bubbleView.isInitialized || !bubbleView.isAttachedToWindow) return@post
             if (state == Pipeline.State.RECORDING && previousState != Pipeline.State.RECORDING) {
-                soundFeedback?.playStart()
-                performHaptic()
+                // The start cue waits for onMicLive(): a Bluetooth mic can take a second to
+                // come up, and words spoken after an early chime were being lost.
+                micLive = false
             } else if (state != Pipeline.State.RECORDING && previousState == Pipeline.State.RECORDING) {
-                soundFeedback?.playStop()
+                if (micLive) soundFeedback?.playStop()
                 performHaptic()
+                micLive = false
             }
 
             val colorRes = when (state) {
@@ -633,9 +639,7 @@ class FloatingBubbleService : LifecycleService() {
                 bubbleLabel.visibility = View.GONE
                 if (state == Pipeline.State.RECORDING) {
                     bubbleIcon.visibility = View.GONE
-                    bubbleProgress.visibility = View.GONE
-                    bubbleSpectrum.visibility = View.VISIBLE
-                    bubbleSpectrum.startAnimating()
+                    showRecordingVisual()
                 } else if (state == Pipeline.State.PROCESSING) {
                     bubbleIcon.visibility = View.GONE
                     bubbleSpectrum.stopAnimating()
@@ -655,11 +659,11 @@ class FloatingBubbleService : LifecycleService() {
                 if (state != previousState) bubbleView.announceForAccessibility(description)
             } else if (state == Pipeline.State.RECORDING) {
                 bubbleLabel.visibility = View.GONE
-                bubbleSpectrum.visibility = View.VISIBLE
                 bubbleDiscard.visibility = View.VISIBLE
-                bubbleSpectrum.startAnimating()
+                showRecordingVisual()
             } else {
                 hideLiveDraft()
+                bubbleProgress.visibility = View.GONE
                 bubbleSpectrum.stopAnimating()
                 bubbleSpectrum.visibility = View.GONE
                 bubbleDiscard.visibility = View.GONE
@@ -676,6 +680,31 @@ class FloatingBubbleService : LifecycleService() {
             // A state change can flip visibility: e.g. the keyboard closed mid-recording
             // (pill stayed pinned) and the pipeline just returned to IDLE — hide now.
             applyBubbleVisibility()
+        }
+    }
+
+    /** Main thread. Spinner while the mic connects, live waveform once it hears sound. */
+    private fun showRecordingVisual() {
+        bubbleProgress.visibility = if (micLive) View.GONE else View.VISIBLE
+        if (micLive) {
+            bubbleSpectrum.visibility = View.VISIBLE
+            bubbleSpectrum.startAnimating()
+        } else {
+            bubbleSpectrum.stopAnimating()
+            bubbleSpectrum.visibility = View.GONE
+        }
+    }
+
+    /** Pipeline callback (main thread): the microphone is delivering sound — speak now. */
+    private fun onMicLive() {
+        if (shuttingDown || micLive || currentState != Pipeline.State.RECORDING) return
+        mainHandler.post {
+            if (shuttingDown || micLive || currentState != Pipeline.State.RECORDING) return@post
+            if (!::bubbleView.isInitialized || !bubbleView.isAttachedToWindow) return@post
+            micLive = true
+            soundFeedback?.playStart()
+            performHaptic()
+            showRecordingVisual()
         }
     }
 

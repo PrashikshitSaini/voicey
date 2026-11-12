@@ -22,6 +22,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.TimeoutCancellationException
 
 /** Owns one recording session from hardware start through final file cleanup. */
 class Pipeline(
@@ -33,6 +35,8 @@ class Pipeline(
     private val onLiveDraftChanged: ((LiveDraftUi) -> Unit)? = null,
     private val onRecordingStarting: (() -> Unit)? = null,
     private val onRecordingStopped: (() -> Unit)? = null,
+    /** Main thread: the microphone is delivering real sound, so the user can speak now. */
+    private val onCaptureLive: (() -> Unit)? = null,
 ) {
     enum class State { IDLE, RECORDING, PROCESSING, ERROR }
 
@@ -49,6 +53,7 @@ class Pipeline(
         audioChunkListener = ::onAudioChunk
         captureFailureListener = ::onRecorderFailure
         noticeListener = onMessage
+        captureLiveListener = ::onRecorderLive
     }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     // Separate ownership scope: service shutdown cancels UI/network work but never strands
@@ -316,7 +321,17 @@ class Pipeline(
                 ?: FocusAccessibilityService.currentPackageName()
             Triple(node, target, ContextReader.read(node, target, imeOptions))
         }
-        val cleaned = PostProcessor(settings, corrections).clean(raw, ctx)
+        // Cleanup is polish, not a requirement: a slow or failing model must never cost the
+        // user their dictation. On timeout/failure the Whisper transcript is inserted as-is.
+        val cleaned = try {
+            withTimeout(CLEANUP_DEADLINE_MS) { PostProcessor(settings, corrections).clean(raw, ctx) }
+        } catch (_: TimeoutCancellationException) {
+            onMessageIfCurrent(generation, "Cleanup was slow — inserted the raw transcript")
+            raw
+        } catch (_: PostProcessException) {
+            onMessageIfCurrent(generation, "Cleanup failed — inserted the raw transcript")
+            raw
+        }
         val toInsert = spaceForInsertion(cleaned.ifBlank { raw }, ctx.textBefore, ctx.textAfter)
 
         val result = injector.insert(
@@ -348,6 +363,14 @@ class Pipeline(
                 failIfCurrent(generation, "This editor needs clipboard fallback; disable strict clipboard-free mode")
             }
             TextInjector.InsertionResult.SKIPPED_EMPTY -> updateStateIfCurrent(generation, State.IDLE)
+        }
+    }
+
+    /** Capture thread → main. A stale signal from an older session is ignored. */
+    private fun onRecorderLive() {
+        val session = activeSession ?: return
+        scope.launch {
+            if (activeSession === session && state == State.RECORDING) onCaptureLive?.invoke()
         }
     }
 
@@ -496,6 +519,8 @@ class Pipeline(
         const val MIN_AUDIO_BYTES = 4_096L
         const val ERROR_AUTO_CLEAR_MS = 2_000L
         const val STOP_TIMEOUT_MS = 1_000L
+        /** gpt-oss-20b at low reasoning effort normally answers in well under a second on Groq. */
+        const val CLEANUP_DEADLINE_MS = 5_000L
     }
 }
 

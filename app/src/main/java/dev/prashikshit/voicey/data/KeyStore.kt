@@ -10,18 +10,7 @@ import androidx.security.crypto.MasterKey
  * kept in the device's hardware-backed keystore. Used for API keys and user settings.
  */
 class KeyStore(context: Context) {
-    private val prefs: SharedPreferences = run {
-        val masterKey = MasterKey.Builder(context)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-        EncryptedSharedPreferences.create(
-            context,
-            PREFS_NAME,
-            masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-        )
-    }
+    private val prefs: SharedPreferences = shared(context.applicationContext)
 
     fun getString(key: String, default: String): String = prefs.getString(key, default) ?: default
     fun getBoolean(key: String, default: Boolean): Boolean = prefs.getBoolean(key, default)
@@ -40,5 +29,22 @@ class KeyStore(context: Context) {
 
     private companion object {
         const val PREFS_NAME = "voicey_secure_prefs"
+
+        // Building the master key and Tink keysets hits the hardware keystore and costs
+        // noticeable time on every dictation. One wrapper per process is safe: all reads and
+        // writes go through the same underlying SharedPreferences file object.
+        @Volatile
+        private var cached: SharedPreferences? = null
+
+        fun shared(context: Context): SharedPreferences =
+            cached ?: synchronized(this) {
+                cached ?: EncryptedSharedPreferences.create(
+                    context,
+                    PREFS_NAME,
+                    MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
+                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+                ).also { cached = it }
+            }
     }
 }

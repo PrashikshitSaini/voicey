@@ -90,8 +90,29 @@ KNOWN_CORRECTIONS (the user previously fixed these transcription mistakes)"""
     fun preservesNormalCleanedTranscript() {
         val cleaned = "This is the polished transcription."
 
-        assertEquals(cleaned, CleanupOutputGuard.safeText(cleaned, "raw words"))
+        assertEquals(cleaned, CleanupOutputGuard.safeText(cleaned, "um this is uh the polished transcription"))
         assertFalse(CleanupOutputGuard.containsInternalScaffolding(cleaned))
+    }
+
+    @Test
+    fun dictatedQuestionIsKeptInsteadOfAnswered() {
+        val raw = "What's the capital of France?"
+        assertEquals(raw, CleanupOutputGuard.safeText("The capital of France is Paris.", raw))
+        assertEquals("What's the capital of France?", CleanupOutputGuard.safeText("What's the capital of France?", raw))
+    }
+
+    @Test
+    fun dictatedRequestIsKeptInsteadOfCarriedOut() {
+        val raw = "write an email to Sam about lunch on Friday"
+        val reply = "Hi Sam,\n\nWould you like to grab lunch together this Friday? Let me know what works.\n\nBest,"
+        assertEquals(raw, CleanupOutputGuard.safeText(reply, raw))
+    }
+
+    @Test
+    fun normalCleanupWithListsNumbersAndVocabularyIsKept() {
+        val raw = "um so first call grok second uh send the deck at five thirty"
+        val cleaned = "1. Call Groq\n2. Send the deck at 5:30"
+        assertEquals(cleaned, CleanupOutputGuard.safeText(cleaned, raw, allowedWords = listOf("Groq")))
     }
 
     @Test

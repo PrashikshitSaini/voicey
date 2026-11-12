@@ -9,15 +9,48 @@ internal object CleanupOutputGuard {
      * response, the only safe recovery is the original Whisper transcript: trying to
      * extract a suffix or prefix could still paste vocabulary, context, or instructions.
      */
-    fun safeText(candidate: String, rawTranscript: String, context: CleanupContext = CleanupContext.EMPTY): String {
+    fun safeText(
+        candidate: String,
+        rawTranscript: String,
+        context: CleanupContext = CleanupContext.EMPTY,
+        allowedWords: Collection<String> = emptyList(),
+    ): String {
         val cleaned = candidate.trim()
         return if (containsInternalScaffolding(cleaned) ||
             repeatsFieldContext(cleaned, rawTranscript, context) ||
-            echoesFormattingExample(cleaned, rawTranscript)
+            echoesFormattingExample(cleaned, rawTranscript) ||
+            answersInsteadOfCleaning(cleaned, rawTranscript, context, allowedWords)
         ) {
             rawTranscript.trim()
         } else cleaned
     }
+
+    /**
+     * Chat models sometimes treat a dictated question or request as addressed to them and
+     * reply. Cleanup only removes, reorders, re-spells, and punctuates the speaker's words, so
+     * a reply shows up as (a) a spoken question that lost every question mark, or (b) output
+     * dominated by words the speaker never said. Either way the raw transcript is safer.
+     */
+    private fun answersInsteadOfCleaning(
+        candidate: String,
+        raw: String,
+        context: CleanupContext,
+        allowedWords: Collection<String>,
+    ): Boolean {
+        if (raw.any { it == '?' || it == '？' } && candidate.none { it == '?' || it == '？' }) return true
+        val known = HashSet<String>()
+        (listOf(raw, context.textBefore, context.textAfter) + allowedWords).forEach { text ->
+            WORD.findAll(text.lowercase()).forEach { known += it.value }
+        }
+        // Digits are list numbering or spoken numbers rewritten as figures, not new content.
+        val output = WORD.findAll(candidate.lowercase()).map { it.value }
+            .filterNot { word -> word.all(Char::isDigit) }
+            .toList()
+        val novel = output.count { it !in known }
+        return novel >= MIN_NOVEL_WORDS && novel * 2 > output.size
+    }
+
+    private const val MIN_NOVEL_WORDS = 4
 
     /** A small model sometimes copies the formatting policy's example list instead of the dictation. */
     private fun echoesFormattingExample(candidate: String, raw: String): Boolean {
@@ -72,6 +105,7 @@ internal object CleanupOutputGuard {
 
     private val INTERNAL_MARKERS = listOf(
         "RAW_TRANSCRIPTION:",
+        "never answer or act on it",
         "FOREGROUND_APP:",
         "FOCUSED_FIELD_HINT:",
         "FOCUSED_FIELD_TYPE:",

@@ -55,6 +55,14 @@ class Recorder(private val context: Context) {
     @Volatile
     var captureFailureListener: ((Throwable) -> Unit)? = null
 
+    /**
+     * Called once from the capture thread when the input delivers real sound. A Bluetooth
+     * headset can return exact digital silence while its link comes up; this is the honest
+     * "speak now" signal instead of the moment the start was requested.
+     */
+    @Volatile
+    var captureLiveListener: (() -> Unit)? = null
+
     /** Called from the starting thread when automatic routing had to fall back to the phone mic. */
     @Volatile
     var noticeListener: ((String) -> Unit)? = null
@@ -134,6 +142,8 @@ class Recorder(private val context: Context) {
                 // only changes how often we drain it. File content is byte-identical.
                 val buf = ByteArray(LEVEL_CHUNK_BYTES)
                 var routeVerified = bluetoothRoute == null
+                var live = false
+                var silentBytes = 0
                 FileOutputStream(session.outputFile, true).use { fos ->
                     while (session.running) {
                         val read = session.record.read(buf, 0, buf.size)
@@ -144,6 +154,21 @@ class Recorder(private val context: Context) {
                                     throw IOException("Android did not route recording to the earbuds microphone; reconnect and retry")
                                 }
                                 routeVerified = true
+                            }
+                            if (!live) {
+                                // Real microphones always have a noise floor; exact zeros are a link
+                                // that is not carrying audio yet. Leading zeros are dropped so they
+                                // do not inflate Whisper's no-speech score or the upload.
+                                if (isDigitalSilence(buf, read) && silentBytes < LIVE_FALLBACK_BYTES) {
+                                    silentBytes += read
+                                    continue
+                                }
+                                live = true
+                                try {
+                                    captureLiveListener?.invoke()
+                                } catch (_: Exception) {
+                                    // UI notification must never stop capture.
+                                }
                             }
                             fos.write(buf, 0, read)
                             session.pcmBytesWritten += read
@@ -196,6 +221,11 @@ class Recorder(private val context: Context) {
             ar.release()
             throw e
         }
+    }
+
+    private fun isDigitalSilence(buf: ByteArray, read: Int): Boolean {
+        for (i in 0 until read) if (buf[i].toInt() != 0) return false
+        return true
     }
 
     /** Computes chunk RMS and forwards the normalized level. Skips work when unobserved. */
@@ -388,6 +418,9 @@ class Recorder(private val context: Context) {
         const val WAV_HEADER_BYTES = 44
         const val MIN_BUFFER_BYTES = 8_192
         const val STOP_TIMEOUT_MS = 1_000L
+
+        /** After 1.5 s of exact zeros, stop waiting and record whatever the route delivers. */
+        const val LIVE_FALLBACK_BYTES = 48_000
 
         /** 50 ms of 16 kHz / 16-bit / mono PCM — the level-update cadence. */
         const val LEVEL_CHUNK_BYTES = 1_600

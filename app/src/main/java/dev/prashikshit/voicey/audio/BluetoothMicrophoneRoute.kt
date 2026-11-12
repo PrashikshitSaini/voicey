@@ -47,9 +47,14 @@ internal class BluetoothMicrophoneRoute(private val context: Context) : AutoClos
                 try {
                     requested = true
                     if (!manager.setCommunicationDevice(target)) throw IOException("Android rejected the earbuds microphone")
-                    if (manager.communicationDevice?.id == target.id) ready.countDown()
-                    if (!ready.await(5, TimeUnit.SECONDS) || manager.communicationDevice?.id != target.id) {
-                        throw IOException("Earbuds microphone did not connect; check Bluetooth call audio and retry")
+                    // Samsung applies the route ~0.2 s after the request but dispatches the
+                    // changed-callback ~0.6 s later. Polling the applied device removes that wait.
+                    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(CONNECT_TIMEOUT_S)
+                    while (manager.communicationDevice?.id != target.id) {
+                        if (System.nanoTime() >= deadline) {
+                            throw IOException("Earbuds microphone did not connect; check Bluetooth call audio and retry")
+                        }
+                        ready.await(POLL_MS, TimeUnit.MILLISECONDS)
                     }
                 } finally {
                     manager.removeOnCommunicationDeviceChangedListener(listener)
@@ -66,7 +71,7 @@ internal class BluetoothMicrophoneRoute(private val context: Context) : AutoClos
                     requested = true
                     manager.startBluetoothSco()
                     manager.isBluetoothScoOn = true
-                    if (!ready.await(5, TimeUnit.SECONDS)) {
+                    if (!ready.await(CONNECT_TIMEOUT_S, TimeUnit.SECONDS)) {
                         throw IOException("Earbuds microphone did not connect; enable Bluetooth call audio and retry")
                     }
                 } finally {
@@ -100,10 +105,17 @@ internal class BluetoothMicrophoneRoute(private val context: Context) : AutoClos
             }
         } finally {
             requested = false
-            previousMode?.let { mode ->
-                if (manager.mode == AudioManager.MODE_IN_COMMUNICATION) manager.mode = mode
-            }
+            // Always release the call-mode request this route made. Since Android 12 this only
+            // withdraws Voicey's own claim; it cannot end a real call. The old conditional check
+            // was false on Samsung after routing cleared, leaving the phone in call mode until
+            // Android's own ~6 s watchdog reset it (seen in dumpsys on an S25+).
+            previousMode?.let { manager.mode = it }
             previousMode = null
         }
+    }
+
+    private companion object {
+        const val CONNECT_TIMEOUT_S = 5L
+        const val POLL_MS = 50L
     }
 }
