@@ -63,6 +63,11 @@ class Recorder(private val context: Context) {
     @Volatile
     var captureLiveListener: (() -> Unit)? = null
 
+    /** Diagnostics only: which kind of input the most recent recording used. */
+    @Volatile
+    var lastInputLabel: String = "unknown"
+        private set
+
     /** Called from the starting thread when automatic routing had to fall back to the phone mic. */
     @Volatile
     var noticeListener: ((String) -> Unit)? = null
@@ -110,7 +115,16 @@ class Recorder(private val context: Context) {
                 bluetoothRoute = null
                 noticeListener?.invoke("Headset mic unavailable — using phone mic")
             }
+            captureDevice = null
             createAndStart(bufferSize, null)
+        }
+
+        lastInputLabel = when {
+            bluetoothRoute == null && captureDevice == null -> "phone"
+            bluetoothRoute != null && captureDevice?.type == AudioDeviceInfo.TYPE_BLE_HEADSET -> "bt_le"
+            bluetoothRoute != null -> "bt_call"
+            captureDevice?.type == AudioDeviceInfo.TYPE_WIRED_HEADSET -> "wired"
+            else -> "usb"
         }
 
         val out = try {

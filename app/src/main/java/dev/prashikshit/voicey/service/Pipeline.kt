@@ -9,6 +9,7 @@ import dev.prashikshit.voicey.net.PostProcessor
 import dev.prashikshit.voicey.net.TranscriptionException
 import dev.prashikshit.voicey.net.WhisperClient
 import java.io.File
+import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -105,6 +106,7 @@ class Pipeline(
         if (state != State.RECORDING || !lifecycleGate.reserveProcessing(session.lease)) return
         stopLiveDraft()
         updateState(State.PROCESSING)
+        session.stoppedAtMs = android.os.SystemClock.elapsedRealtime()
         session.stopSignal.complete(StopReason.PROCESS)
     }
 
@@ -185,7 +187,7 @@ class Pipeline(
                 return
             }
 
-            processAudio(session.generation, file)
+            processAudio(session.generation, file, DictationTimings(context, session.stoppedAtMs))
         } catch (_: CancellationException) {
             // cancel() has already invalidated this generation; finally still owns stop/delete.
         } catch (e: TranscriptionException) {
@@ -294,20 +296,40 @@ class Pipeline(
         }
     }
 
-    private suspend fun processAudio(generation: Long, file: File) {
+    private suspend fun processAudio(generation: Long, file: File, timings: DictationTimings) {
+        timings.stage("mic_release")
+        timings.note("audio_s", "%.1f".format(Locale.US, (file.length() - 44).coerceAtLeast(0) / 32_000.0))
+        timings.note("upload_kb", file.length() / 1024)
+        timings.note("mic", recorder.lastInputLabel)
+        var outcome = "error"
+        try {
+            outcome = processAudioTimed(generation, file, timings)
+        } finally {
+            timings.finish(outcome)
+        }
+    }
+
+    private suspend fun processAudioTimed(generation: Long, file: File, timings: DictationTimings): String {
         val (settings, corrections) = withContext(Dispatchers.IO) {
             Settings.load(context) to LearnedCorrections(context).all()
         }
+        timings.stage("settings")
         if (!settings.isReady()) {
             failIfCurrent(generation, "Set API key in Voicey settings")
-            return
+            return "no_api_key"
         }
+        timings.note("stt", settings.transcriptionModel)
+        timings.note("llm", settings.cleanupModel)
 
-        val raw = WhisperClient(settings).transcribe(file)
+        val whisper = WhisperClient(settings)
+        val raw = whisper.transcribe(file)
+        timings.stage("transcribe")
+        timings.note("stt_requests", whisper.lastRequestCount)
+        whisper.lastMinAvgLogprob?.let { timings.note("stt_min_logprob", "%.2f".format(Locale.US, it)) }
         if (raw.isBlank()) {
             updateStateIfCurrent(generation, State.IDLE)
             onMessageIfCurrent(generation, "Heard nothing")
-            return
+            return "heard_nothing"
         }
 
         val editorPackage = FocusAccessibilityService.currentEditorPackageName()
@@ -321,17 +343,25 @@ class Pipeline(
                 ?: FocusAccessibilityService.currentPackageName()
             Triple(node, target, ContextReader.read(node, target, imeOptions))
         }
+        timings.stage("context")
         // Cleanup is polish, not a requirement: a slow or failing model must never cost the
         // user their dictation. On timeout/failure the Whisper transcript is inserted as-is.
+        var cleanupResult = "ok"
         val cleaned = try {
             withTimeout(CLEANUP_DEADLINE_MS) { PostProcessor(settings, corrections).clean(raw, ctx) }
         } catch (_: TimeoutCancellationException) {
+            cleanupResult = "timeout"
             onMessageIfCurrent(generation, "Cleanup was slow — inserted the raw transcript")
             raw
         } catch (_: PostProcessException) {
+            cleanupResult = "failed"
             onMessageIfCurrent(generation, "Cleanup failed — inserted the raw transcript")
             raw
         }
+        timings.stage("cleanup")
+        timings.note("cleanup", cleanupResult)
+        timings.note("words_raw", wordCount(raw))
+        timings.note("words_changed", changedWordCount(raw, cleaned))
         val toInsert = spaceForInsertion(cleaned.ifBlank { raw }, ctx.textBefore, ctx.textAfter)
 
         val result = injector.insert(
@@ -340,6 +370,7 @@ class Pipeline(
             neverUseClipboard = settings.neverUseClipboard,
         )
         focusedNode?.recycle()
+        timings.stage("insert")
 
         when (result) {
             TextInjector.InsertionResult.WROTE -> {
@@ -364,6 +395,16 @@ class Pipeline(
             }
             TextInjector.InsertionResult.SKIPPED_EMPTY -> updateStateIfCurrent(generation, State.IDLE)
         }
+        return result.name.lowercase()
+    }
+
+    private fun words(text: String) = WORD_REGEX.findAll(text.lowercase()).map { it.value }.toList()
+    private fun wordCount(text: String) = words(text).size
+
+    /** Diagnostics: output words not present in the transcript (how much cleanup rewrote). */
+    private fun changedWordCount(raw: String, cleaned: String): Int {
+        val spoken = words(raw).toHashSet()
+        return words(cleaned).count { it !in spoken }
     }
 
     /** Capture thread → main. A stale signal from an older session is ignored. */
@@ -513,6 +554,7 @@ class Pipeline(
         @Volatile var failure: Throwable? = null
         @Volatile var stoppedNotified = false
         @Volatile var runFinished = false
+        @Volatile var stoppedAtMs = 0L
     }
 
     private companion object {
@@ -523,6 +565,7 @@ class Pipeline(
         const val STOP_TIMEOUT_MS = 3_000L
         /** gpt-oss-20b at low reasoning effort normally answers in well under a second on Groq. */
         const val CLEANUP_DEADLINE_MS = 5_000L
+        val WORD_REGEX = Regex("[\\p{L}\\p{M}\\p{N}']+")
     }
 }
 

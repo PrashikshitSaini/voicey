@@ -21,6 +21,16 @@ import java.nio.ByteOrder
  */
 class WhisperClient(private val settings: Settings) {
 
+    /** Diagnostics: lowest segment avg_logprob of the last response (closer to 0 = surer). */
+    @Volatile
+    var lastMinAvgLogprob: Double? = null
+        private set
+
+    /** Diagnostics: transcription requests the last [transcribe] call made (2 = echo retry). */
+    @Volatile
+    var lastRequestCount = 0
+        private set
+
     /**
      * Returns the raw transcript text, or an empty string if Whisper's response is
      * judged to be a silence hallucination. Throws [TranscriptionException] on any
@@ -54,6 +64,7 @@ class WhisperClient(private val settings: Settings) {
         // cannot decode, so a pure echo triggers one retry without the prompt (unless the
         // clip is plainly silent). The cleanup model still receives the vocabulary.
         val prompt = settings.vocabulary.joinToString(", ").trim()
+        lastRequestCount = 1
         val first = transcribeBody(
             filename = audio.name,
             body = audio.asRequestBody("audio/wav".toMediaType()),
@@ -65,6 +76,7 @@ class WhisperClient(private val settings: Settings) {
         if (first.noSpeechProb >= ECHO_SILENCE_THRESHOLD) return@withContext ""
         // Fresh body: a request body can only be written once. The first pass already
         // said the audio was undecodable, so the retry must be confident to be believed.
+        lastRequestCount = 2
         val retry = transcribeBody(
             filename = audio.name,
             body = audio.asRequestBody("audio/wav".toMediaType()),
@@ -154,6 +166,11 @@ class WhisperClient(private val settings: Settings) {
             return Transcript(body.trim(), 0.0)
         }
         val text = json.optString("text").trim()
+        json.optJSONArray("segments")?.let { segments ->
+            lastMinAvgLogprob = (0 until segments.length())
+                .mapNotNull { segments.optJSONObject(it)?.optDouble("avg_logprob")?.takeUnless(Double::isNaN) }
+                .minOrNull()
+        }
         val noSpeechProb = json.optJSONArray("segments")
             ?.optJSONObject(0)
             ?.optDouble("no_speech_prob", 0.0)
