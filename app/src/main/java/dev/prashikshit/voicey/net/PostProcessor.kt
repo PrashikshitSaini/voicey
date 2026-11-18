@@ -40,6 +40,11 @@ class PostProcessor(
                 put("reasoning_effort", "low")
                 // Groq-only flag: don't ship the reasoning text back to the phone.
                 if (settings.apiBase.contains("groq.com", ignoreCase = true)) put("include_reasoning", false)
+            } else if (settings.cleanupModel.contains("qwen3", ignoreCase = true) &&
+                settings.apiBase.contains("groq.com", ignoreCase = true)
+            ) {
+                // Groq's Qwen 3.x accepts "none": no hidden thinking at all, fastest output.
+                put("reasoning_effort", "none")
             }
             put("messages", JSONArray().apply {
                 put(JSONObject().apply {

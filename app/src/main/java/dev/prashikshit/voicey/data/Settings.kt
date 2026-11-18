@@ -55,9 +55,9 @@ data class Settings(
 
         /**
          * Dropdown suggestions for the model fields (Groq catalog; both fields stay
-         * free-text for other providers). Ordered fast → best. Reasoning models that
-         * emit <think> blocks (e.g. qwen3) are deliberately excluded from suggestions —
-         * PostProcessor strips think tags defensively, but they'd still burn latency.
+         * free-text for other providers). Ordered fast → best. Qwen 3.8 is a reasoning model;
+         * PostProcessor turns its reasoning off (reasoning_effort=none) so it answers directly,
+         * and still strips any <think> block defensively. It is a Groq preview model.
          */
         val TRANSCRIPTION_MODEL_SUGGESTIONS = listOf(
             "whisper-large-v3-turbo",
@@ -66,6 +66,7 @@ data class Settings(
         val CLEANUP_MODEL_SUGGESTIONS = listOf(
             "openai/gpt-oss-20b",
             "openai/gpt-oss-120b",
+            "qwen/qwen3.8-27b",
         )
 
         /**
